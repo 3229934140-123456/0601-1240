@@ -15,6 +15,7 @@ export interface BrandPackage {
   fileCount: number;
   sizeKB: number;
   items: { filename: string; dataUrl: string }[];
+  zipDataUrl?: string;
 }
 
 export interface BrandAssets {
@@ -35,6 +36,8 @@ export interface Project {
   currentRatio: string;
   palette: ColorPalette;
   brandAssets: BrandAssets;
+  exportItems: ExportItem[];
+  releaseChecklist: ReleaseChecklistItem[];
 }
 
 export interface Version {
@@ -186,8 +189,9 @@ export interface ExportItem {
   height: number;
   platform: string;
   status: 'pending' | 'processing' | 'done' | 'error';
-  progress: number;
+  progress?: number;
   url?: string;
+  createdAt?: number;
 }
 
 export interface ReleaseChecklistItem {

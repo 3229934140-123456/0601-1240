@@ -36,8 +36,8 @@ import {
 import PixelButton from '@/components/ui/PixelButton';
 import PixelCard from '@/components/ui/PixelCard';
 import { PLATFORM_SPECS } from '@/data/ratios';
-import { MOCK_RELEASE_CHECKLIST } from '@/data/assets';
 import { useCurrentProject } from '@/hooks/useCurrentProject';
+import { useProjectStore } from '@/store/projectStore';
 import type { ExportItem, PlatformSpec, ReleaseChecklistItem } from '@/types';
 import {
   generateExportImage,
@@ -48,79 +48,6 @@ import {
   syncChecklistFromExports,
   buildExportZip,
 } from '@/utils/export';
-
-const mockExportItems: ExportItem[] = [
-  {
-    id: 'exp-1',
-    name: 'steam_main_capsule',
-    format: 'png',
-    width: 460,
-    height: 215,
-    platform: 'Steam',
-    status: 'done',
-    progress: 100,
-    url: '#',
-  },
-  {
-    id: 'exp-2',
-    name: 'steam_page_bg',
-    format: 'jpg',
-    width: 1920,
-    height: 620,
-    platform: 'Steam',
-    status: 'processing',
-    progress: 65,
-  },
-  {
-    id: 'exp-3',
-    name: 'steam_hero_banner',
-    format: 'png',
-    width: 616,
-    height: 353,
-    platform: 'Steam',
-    status: 'pending',
-    progress: 0,
-  },
-  {
-    id: 'exp-4',
-    name: 'epic_cover_art',
-    format: 'png',
-    width: 1200,
-    height: 1600,
-    platform: 'Epic',
-    status: 'done',
-    progress: 100,
-    url: '#',
-  },
-  {
-    id: 'exp-5',
-    name: 'twitter_promo_v2',
-    format: 'gif',
-    width: 1200,
-    height: 675,
-    platform: 'Twitter',
-    status: 'error',
-    progress: 45,
-  },
-  {
-    id: 'exp-6',
-    name: 'bilibili_cover_final',
-    format: 'png',
-    width: 1146,
-    height: 717,
-    platform: 'B站',
-    status: 'pending',
-    progress: 0,
-  },
-];
-
-const mockLogEntries = [
-  { id: 'log-1', time: '20:45:32', action: '导出完成', item: 'steam_main_capsule.png', status: 'success' },
-  { id: 'log-2', time: '20:44:18', action: '开始导出', item: 'steam_page_bg.jpg', status: 'info' },
-  { id: 'log-3', time: '20:43:55', action: '导出失败', item: 'twitter_promo_v2.gif', status: 'error' },
-  { id: 'log-4', time: '20:42:10', action: '导出完成', item: 'epic_cover_art.png', status: 'success' },
-  { id: 'log-5', time: '20:40:05', action: '加入队列', item: 'bilibili_cover_final.png', status: 'info' },
-];
 
 const formatOptions = [
   { value: 'png', label: 'PNG', icon: Image, desc: '无损压缩，支持透明' },
@@ -142,15 +69,38 @@ const platformColors: Record<string, string> = {
   Twitter: '#1DA1F2',
   微博: '#E6162D',
   B站: '#FB7299',
+  '微信分享': '#07C160',
+  '角色宣传': '#8BC34A',
+  '动图宣传': '#FF5722',
+  '海报宣传': '#E91E63',
+  YouTube: '#FF0000',
+  Twitch: '#9146FF',
+  '品牌套件': '#00BCD4',
+  '商店套件': '#795548',
+  微信: '#07C160',
+  TapTap: '#FFD54F',
+  媒体: '#607D8B',
   通用: '#64FFDA',
   社交: '#FF6B9D',
 };
 
+const mockLogEntries = [
+  { id: 'log-1', time: '20:45:32', action: '导出完成', item: 'main_capsule.png', status: 'success' },
+  { id: 'log-2', time: '20:44:18', action: '开始导出', item: 'page_bg.jpg', status: 'info' },
+  { id: 'log-3', time: '20:43:55', action: '导出失败', item: 'promo_v2.gif', status: 'error' },
+  { id: 'log-4', time: '20:42:10', action: '导出完成', item: 'cover_art.png', status: 'success' },
+  { id: 'log-5', time: '20:40:05', action: '加入队列', item: 'cover_final.png', status: 'info' },
+];
+
 export default function ExportPage() {
   const { projectId, currentProject } = useCurrentProject();
+  const {
+    setExportItems, updateExportItem,
+    setReleaseChecklist, updateReleaseChecklistItem,
+  } = useProjectStore();
   
-  const [exportItems, setExportItems] = useState<ExportItem[]>(mockExportItems);
-  const [checklist, setChecklist] = useState<ReleaseChecklistItem[]>(MOCK_RELEASE_CHECKLIST);
+  const [exportItems, setExportItemsLocal] = useState<ExportItem[]>(currentProject?.exportItems || []);
+  const [checklist, setChecklistLocal] = useState<ReleaseChecklistItem[]>(currentProject?.releaseChecklist || []);
   const [selectedItems, setSelectedItems] = useState<string[]>([]);
   const [platformSpecs] = useState<PlatformSpec[]>(
     PLATFORM_SPECS.map((spec) => ({
@@ -178,6 +128,34 @@ export default function ExportPage() {
   
   const processingRef = useRef<Set<string>>(new Set());
 
+  useEffect(() => {
+    setExportItemsLocal(currentProject?.exportItems || []);
+    setChecklistLocal(currentProject?.releaseChecklist || []);
+    setSelectedItems([]);
+    setExportedBlobs({});
+    processingRef.current.clear();
+  }, [projectId, currentProject?.id]);
+
+  const commitExportItems = useCallback((items: ExportItem[]) => {
+    setExportItemsLocal(items);
+    if (projectId) setExportItems(projectId, items);
+  }, [projectId, setExportItems]);
+
+  const commitChecklist = useCallback((items: ReleaseChecklistItem[]) => {
+    setChecklistLocal(items);
+    if (projectId) setReleaseChecklist(projectId, items);
+  }, [projectId, setReleaseChecklist]);
+
+  const commitExportItem = useCallback((itemId: string, updates: Partial<ExportItem>) => {
+    setExportItemsLocal((prev) => prev.map((i) => (i.id === itemId ? { ...i, ...updates } : i)));
+    if (projectId) updateExportItem(projectId, itemId, updates);
+  }, [projectId, updateExportItem]);
+
+  const commitChecklistItem = useCallback((itemId: string, updates: Partial<ReleaseChecklistItem>) => {
+    setChecklistLocal((prev) => prev.map((i) => (i.id === itemId ? { ...i, ...updates } : i)));
+    if (projectId) updateReleaseChecklistItem(projectId, itemId, updates);
+  }, [projectId, updateReleaseChecklistItem]);
+
   const totalItems = exportItems.length;
   const doneCount = exportItems.filter((i) => i.status === 'done').length;
   const pendingCount = exportItems.filter((i) => i.status === 'pending').length;
@@ -204,13 +182,7 @@ export default function ExportPage() {
     let currentProgress = 0;
     const progressInterval = setInterval(() => {
       currentProgress = Math.min(currentProgress + Math.random() * 12, 98);
-      setExportItems((prev) =>
-        prev.map((i) =>
-          i.id === itemId && i.status === 'processing'
-            ? { ...i, progress: currentProgress }
-            : i
-        )
-      );
+      commitExportItem(itemId, { progress: currentProgress });
     }, 300);
 
     try {
@@ -229,26 +201,14 @@ export default function ExportPage() {
       }
 
       clearInterval(progressInterval);
-      setExportItems((prev) =>
-        prev.map((i) =>
-          i.id === itemId
-            ? { ...i, status: 'done' as const, progress: 100, url: dataUrl || '#' }
-            : i
-        )
-      );
+      commitExportItem(itemId, { status: 'done', progress: 100, url: dataUrl || '#' });
       setShowCelebration(true);
       setTimeout(() => setShowCelebration(false), 2000);
     } catch (err) {
       clearInterval(progressInterval);
       const shouldFail = Math.random() < 0.1;
       if (shouldFail) {
-        setExportItems((prev) =>
-          prev.map((i) =>
-            i.id === itemId
-              ? { ...i, status: 'error' as const, progress: currentProgress }
-              : i
-          )
-        );
+        commitExportItem(itemId, { status: 'error', progress: currentProgress });
       } else {
         const { blob, dataUrl } = await generateExportImage(
           item.width,
@@ -260,18 +220,12 @@ export default function ExportPage() {
         if (blob && dataUrl) {
           setExportedBlobs((prev) => ({ ...prev, [itemId]: { blob, dataUrl } }));
         }
-        setExportItems((prev) =>
-          prev.map((i) =>
-            i.id === itemId
-              ? { ...i, status: 'done' as const, progress: 100, url: dataUrl || '#' }
-              : i
-          )
-        );
+        commitExportItem(itemId, { status: 'done', progress: 100, url: dataUrl || '#' });
       }
     } finally {
       processingRef.current.delete(itemId);
     }
-  }, [exportItems, quality]);
+  }, [exportItems, quality, commitExportItem]);
 
   useEffect(() => {
     const itemsToProcess = exportItems.filter(
@@ -298,11 +252,9 @@ export default function ExportPage() {
           );
           if (blob && dataUrl) {
             setExportedBlobs((prev) => ({ ...prev, [item.id]: { blob, dataUrl } }));
-            setExportItems((prev) =>
-              prev.map((i) =>
-                i.id === item.id ? { ...i, url: dataUrl } : i
-              )
-            );
+            if (!item.url || item.url === '#') {
+              commitExportItem(item.id, { url: dataUrl });
+            }
           }
         } catch (e) {
           console.error('Init export item error', e);
@@ -310,7 +262,7 @@ export default function ExportPage() {
       }
     };
     initDoneItems();
-  }, []);
+  }, [exportItems, quality, exportedBlobs, commitExportItem]);
 
   const toggleSelectItem = (id: string) => {
     setSelectedItems((prev) =>
@@ -327,41 +279,26 @@ export default function ExportPage() {
   };
 
   const cancelExport = useCallback((id: string) => {
-    setExportItems((prev) =>
-      prev.map((item) =>
-        item.id === id && item.status === 'processing'
-          ? { ...item, status: 'pending' as const, progress: 0 }
-          : item
-      )
-    );
-  }, []);
+    commitExportItem(id, { status: 'pending', progress: 0 });
+  }, [commitExportItem]);
 
   const restartExport = useCallback((id: string) => {
-    setExportItems((prev) =>
-      prev.map((item) =>
-        item.id === id
-          ? { ...item, status: 'processing' as const, progress: 0 }
-          : item
-      )
-    );
-  }, []);
+    commitExportItem(id, { status: 'processing', progress: 0 });
+  }, [commitExportItem]);
 
   const exportAll = () => {
-    setExportItems((prev) =>
-      prev.map((item) =>
+    commitExportItems(
+      exportItems.map((item) =>
         item.status === 'pending' || item.status === 'error'
-          ? { ...item, status: 'processing' as const, progress: 0 }
+          ? { ...item, status: 'processing', progress: 0 }
           : item
       )
     );
   };
 
   const toggleChecklistItem = (id: string) => {
-    setChecklist((prev) =>
-      prev.map((item) =>
-        item.id === id ? { ...item, done: !item.done } : item
-      )
-    );
+    const item = checklist.find((i) => i.id === id);
+    if (item) commitChecklistItem(id, { done: !item.done });
   };
 
   const handleBrowsePath = () => {
@@ -405,11 +342,11 @@ export default function ExportPage() {
   const handleGenerateChecklist = useCallback(() => {
     const projectName = currentProject?.name || 'PixelForge Project';
     const synced = syncChecklistFromExports(checklist, exportItems);
-    setChecklist(synced);
+    commitChecklist(synced);
     const content = generateReleaseChecklistContent(projectName, synced, exportItems);
     setChecklistContent(content);
     setShowChecklistModal(true);
-  }, [currentProject, checklist, exportItems]);
+  }, [currentProject, checklist, exportItems, commitChecklist]);
 
   const handleDownloadZip = useCallback(async () => {
     const doneItems = selectedItems.length > 0

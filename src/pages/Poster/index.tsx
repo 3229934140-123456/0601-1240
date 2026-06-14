@@ -39,6 +39,7 @@ const PosterEditor: React.FC = () => {
   const {
     saveVersion,
     addComment,
+    resolveComment,
     updatePalette,
     addCollaborator,
   } = useProjectStore();
@@ -53,9 +54,11 @@ const PosterEditor: React.FC = () => {
   const [showRatioDropdown, setShowRatioDropdown] = useState(false);
   const [showVersionModal, setShowVersionModal] = useState(false);
   const [showCollabModal, setShowCollabModal] = useState(false);
+  const [showCommentListModal, setShowCommentListModal] = useState(false);
   const [showCommentMode, setShowCommentMode] = useState(false);
   const [versionName, setVersionName] = useState('');
   const [collabEmail, setCollabEmail] = useState('');
+  const [commentListText, setCommentListText] = useState('');
   const [batchFind, setBatchFind] = useState('');
   const [batchReplace, setBatchReplace] = useState('');
   const [commentText, setCommentText] = useState('');
@@ -280,6 +283,23 @@ const PosterEditor: React.FC = () => {
         role: 'editor',
       });
       setCollabEmail('');
+    }
+  };
+
+  const handleAddCommentFromList = () => {
+    if (commentListText.trim() && projectId) {
+      const pos = {
+        x: Math.round(canvasWidth / 2),
+        y: Math.round(canvasHeight / 2),
+      };
+      addComment(projectId, {
+        content: commentListText.trim(),
+        position: pos,
+        author: '我',
+        avatar: '',
+        resolved: false,
+      });
+      setCommentListText('');
     }
   };
 
@@ -573,7 +593,16 @@ const PosterEditor: React.FC = () => {
         <div className="flex-1" />
 
         <PixelButton size="sm" variant="default" onClick={() => setShowCommentMode(!showCommentMode)} className={showCommentMode ? 'ring-2 ring-pixel-neon-yellow' : ''}>
-          💬 评论
+          💬 评论点
+        </PixelButton>
+
+        <PixelButton size="sm" variant="default" onClick={() => setShowCommentListModal(true)} className="relative">
+          📝 评论列表
+          {(currentProject?.comments?.length || 0) > 0 && (
+            <span className="absolute -top-1 -right-1 w-5 h-5 bg-pixel-neon-pink text-pixel-xs text-pixel-bg flex items-center justify-center border-2 border-pixel-bg">
+              {currentProject!.comments.filter((c) => !c.resolved).length}
+            </span>
+          )}
         </PixelButton>
 
         <PixelButton size="sm" variant="default" onClick={() => setShowCollabModal(true)}>
@@ -1437,6 +1466,123 @@ const PosterEditor: React.FC = () => {
                             </div>
                           </div>
                         </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </PixelCard>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {showCommentListModal && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/70 flex items-center justify-center z-50"
+            onClick={() => setShowCommentListModal(false)}
+          >
+            <motion.div
+              initial={{ scale: 0.9, y: 20 }}
+              animate={{ scale: 1, y: 0 }}
+              exit={{ scale: 0.9, y: 20 }}
+              onClick={(e) => e.stopPropagation()}
+              className="w-[520px] max-w-[90vw]"
+            >
+              <PixelCard hover={false} className="p-6">
+                <div className="flex items-center justify-between mb-4">
+                  <h2 className="text-pixel-lg text-pixel-neon-yellow font-pixel pixel-text-shadow">
+                    💬 评论列表
+                  </h2>
+                  <span className="chip-pixel bg-pixel-surface text-pixel-xs text-pixel-text-muted">
+                    {currentProject?.comments?.length || 0} 条
+                  </span>
+                </div>
+
+                <div className="mb-4">
+                  <textarea
+                    placeholder="输入评论内容 (回车可继续输入下一条，最新评论自动置顶)..."
+                    className="input-pixel text-sm h-20 resize-none mb-2 w-full"
+                    value={commentListText}
+                    onChange={(e) => setCommentListText(e.target.value)}
+                    autoFocus
+                    key={`comment-list-input-${currentProject?.comments?.length || 0}`}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && !e.shiftKey && commentListText.trim()) {
+                        e.preventDefault();
+                        handleAddCommentFromList();
+                      }
+                    }}
+                  />
+                  <div className="flex gap-2 justify-end">
+                    <PixelButton size="sm" variant="ghost" onClick={() => setShowCommentListModal(false)}>
+                      关闭
+                    </PixelButton>
+                    <PixelButton
+                      size="sm"
+                      variant="warning"
+                      onClick={handleAddCommentFromList}
+                      disabled={!commentListText.trim()}
+                    >
+                      发表评论
+                    </PixelButton>
+                  </div>
+                </div>
+
+                {(currentProject?.comments?.length || 0) > 0 && (
+                  <div className="mt-4 border-t-2 border-pixel-border pt-4">
+                    <h3 className="text-pixel-xs text-pixel-neon-cyan mb-3 font-pixel flex items-center justify-between">
+                      <span>历史评论 (最新置顶)</span>
+                      <span className="text-pixel-text-muted">
+                        未解决: {currentProject!.comments.filter((c) => !c.resolved).length}
+                      </span>
+                    </h3>
+                    <div className="max-h-64 overflow-y-auto space-y-2 pr-1">
+                      {currentProject!.comments.map((c, i) => (
+                        <motion.div
+                          key={c.id}
+                          initial={{ opacity: 0, x: i === 0 ? 20 : 0 }}
+                          animate={{ opacity: 1, x: 0 }}
+                          className={cn(
+                            'p-3 border-2 text-left',
+                            c.resolved
+                              ? 'bg-pixel-bg border-pixel-border opacity-70'
+                              : 'bg-pixel-card border-pixel-neon-yellow/50'
+                          )}
+                        >
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="flex items-center gap-2">
+                              <div className="w-7 h-7 bg-pixel-neon-yellow flex items-center justify-center text-pixel-xs font-pixel text-pixel-bg border-2 border-pixel-bg flex-shrink-0">
+                                {c.author[0].toUpperCase()}
+                              </div>
+                              <div>
+                                <div className="text-vt-sm text-pixel-text-primary">{c.content}</div>
+                                <div className="text-pixel-xs text-pixel-text-muted mt-1">
+                                  {c.author} · {new Date(c.createdAt).toLocaleString('zh-CN')} · 位置 (x{c.position.x}, y{c.position.y})
+                                </div>
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-1 flex-shrink-0">
+                              {c.resolved ? (
+                                <span className="chip-pixel bg-green-600 text-[10px] text-white pointer-events-none">
+                                  ✓ 已解决
+                                </span>
+                              ) : (
+                                <PixelButton
+                                  size="sm"
+                                  variant="ghost"
+                                  onClick={() => resolveComment(projectId!, c.id)}
+                                  className="!py-1"
+                                >
+                                  解决
+                                </PixelButton>
+                              )}
+                            </div>
+                          </div>
+                        </motion.div>
                       ))}
                     </div>
                   </div>

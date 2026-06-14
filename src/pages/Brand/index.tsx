@@ -28,7 +28,7 @@ import { useCurrentProject } from '@/hooks/useCurrentProject';
 import { PRESET_PALETTES } from '@/data/palettes';
 import type { ColorPalette, BrandLogoVariant } from '@/types';
 import { cn } from '@/lib/utils';
-import { downloadFile, generateExportImage } from '@/utils/export';
+import { downloadFile, generateExportImage, buildBrandZip, zipBlobToDataUrl, dataUrlToZipBlob } from '@/utils/export';
 
 const LOGO_ICONS = [
   { id: 'gamepad', name: '游戏手柄', char: '🎮' },
@@ -211,28 +211,101 @@ export default function Brand() {
     if (!projectId || packaging) return;
     setPackaging(true);
     try {
-      const pngRes = await generateExportImage(512, 256, 'png', 'logo');
-      const jpgRes = await generateExportImage(460, 215, 'jpg', 'cover', 92);
-      const paletteText = customColors.map((c, i) => `Color ${i + 1}: ${c}`).join('\n');
-      const paletteBlob = new Blob([paletteText], { type: 'text/plain' });
-      const paletteDataUrl = URL.createObjectURL(paletteBlob);
-      const packageItems: { filename: string; dataUrl: string }[] = [
-        { filename: `${projectId}_logo_512x256.png`, dataUrl: pngRes.dataUrl },
-        { filename: `${projectId}_cover_460x215.jpg`, dataUrl: jpgRes.dataUrl },
-        { filename: `${projectId}_palette.txt`, dataUrl: paletteDataUrl },
+      const projectName = currentProject?.name || '像素冒险';
+      const slug = projectName.replace(/\s+/g, '_').toLowerCase();
+
+      const logos: { filename: string; dataUrl: string }[] = [];
+
+      const logoPromises = (projectLogos.length > 0 ? projectLogos : [selectedLogoVariant]).map(
+        async (logo, i) => {
+          const variantName = logo?.name?.replace(/\s+/g, '_') || `variant_${i + 1}`;
+          const res = await generateExportImage(2048, 2048, 'png', `Logo ${variantName}`);
+          logos.push({
+            filename: `${slug}_${variantName}_2048.png`,
+            dataUrl: res.dataUrl,
+          });
+          const smallRes = await generateExportImage(512, 512, 'png', `Logo ${variantName} small`);
+          logos.push({
+            filename: `${slug}_${variantName}_512.png`,
+            dataUrl: smallRes.dataUrl,
+          });
+        }
+      );
+      await Promise.all(logoPromises);
+
+      if (logos.length === 0) {
+        const defaultRes = await generateExportImage(2048, 2048, 'png', '主 Logo');
+        logos.push({ filename: `${slug}_main_logo_2048.png`, dataUrl: defaultRes.dataUrl });
+      }
+
+      const paletteGuide = `品牌调色板规范 / Palette Guide
+==========================================
+项目: ${projectName}
+生成时间: ${new Date().toLocaleString('zh-CN')}
+
+【主色值 - HEX / RGB 对照】
+` + customColors.map((c, i) => {
+        const r = parseInt(c.slice(1, 3), 16);
+        const g = parseInt(c.slice(3, 5), 16);
+        const b = parseInt(c.slice(5, 7), 16);
+        const tags = ['主色 Primary', '辅色 Secondary', '点缀 Accent', '背景 Background', '前景 Foreground'];
+        return `  Color ${i + 1} (${tags[i] || '通用'}):
+    HEX: ${c.toUpperCase()}
+    RGB: rgb(${r}, ${g}, ${b})
+    CSS: --color-${i + 1}: ${c};
+`;
+      }).join('\n') + `
+
+【使用规范】
+  • 主色用于 Logo / 强调按钮 / 关键高亮
+  • 辅色用于次级元素 / 装饰边框
+  • 配色对比度请保持 WCAG AA 级以上
+  • 禁止修改品牌色的色相，只可调整透明度
+`;
+
+      const brandCopy = `品牌文案集合 / Brand Copywriting
+==========================================
+项目: ${projectName}
+
+【官方名称】
+  中文: ${projectName}
+  English: ${projectName.replace(/\s+/g, '_').toUpperCase()}
+
+【品牌口号 / Slogan】
+  ${logoText || 'PIXELFORGE'}
+
+【副标题 / Tagline】
+  ${logoTagline || '8-BIT PIXEL ADVENTURE'}
+
+【品牌描述 / Description】
+  ${logoDescription || '复古像素风独立游戏，融合经典玩法与现代美学。'}
+
+【应用场景示例】
+  1. 商店页简介: "${logoText || projectName} —— ${logoTagline || '8-BIT PIXEL ADVENTURE'}"
+  2. 社交简介: "欢迎来到${projectName}的像素世界！${logoTagline || ''}"
+  3. 媒体通稿标题: "[${projectName}] ${logoTagline || '像素冒险全新启程'}"
+`;
+
+      const zipBlob = await buildBrandZip(projectName, logos, paletteGuide, brandCopy);
+      const zipDataUrl = await zipBlobToDataUrl(zipBlob);
+
+      const packageItems = [
+        ...logos,
+        { filename: '调色板说明.txt', dataUrl: `data:text/plain;base64,${btoa(unescape(encodeURIComponent(paletteGuide)))}` },
+        { filename: '品牌文案.txt', dataUrl: `data:text/plain;base64,${btoa(unescape(encodeURIComponent(brandCopy)))}` },
       ];
       const totalSize = Math.ceil(
         packageItems.reduce((acc, it) => acc + it.dataUrl.length * 0.75, 0) / 1024
       );
       saveBrandPackage(projectId, {
-        name: `${currentProject?.name || '项目'}品牌包`,
+        name: `${projectName}品牌包`,
         fileCount: packageItems.length,
         sizeKB: totalSize,
         items: packageItems,
+        zipDataUrl,
       });
-      if (pngRes.blob) downloadFile(pngRes.blob, packageItems[0].filename);
-      if (jpgRes.blob) downloadFile(jpgRes.blob, packageItems[1].filename);
-      downloadFile(paletteBlob, packageItems[2].filename);
+
+      downloadFile(zipBlob, `${slug}_brand_kit.zip`);
     } finally {
       setPackaging(false);
     }
@@ -1229,14 +1302,45 @@ export default function Brand() {
                   <Share2 className="w-4 h-4 text-pixel-neon-yellow" />
                   <h2 className="font-pixel text-pixel-sm text-pixel-text-primary">品牌包历史</h2>
                 </div>
-                <div className="space-y-2 max-h-40 overflow-y-auto">
+                <div className="space-y-2 max-h-60 overflow-y-auto">
                   {projectPackages.map((pkg) => (
                     <div
                       key={pkg.id}
-                      className="p-2 border-2 border-pixel-border bg-pixel-surface hover:border-pixel-neon-cyan transition-colors"
+                      className="p-3 border-2 border-pixel-border bg-pixel-surface hover:border-pixel-neon-cyan transition-colors cursor-pointer"
+                      onClick={async () => {
+                        const projectName = currentProject?.name || '品牌包';
+                        const slug = projectName.replace(/\s+/g, '_').toLowerCase();
+                        if (pkg.zipDataUrl) {
+                          const blob = dataUrlToZipBlob(pkg.zipDataUrl);
+                          downloadFile(blob, `${slug}_brand_kit.zip`);
+                        } else {
+                          const logos = pkg.items.filter((it) => /\.(png|jpg|jpeg|gif)$/i.test(it.filename));
+                          const paletteItem = pkg.items.find((it) => it.filename.includes('调色') || it.filename.includes('palette'));
+                          const copyItem = pkg.items.find((it) => it.filename.includes('文案') || it.filename.includes('copy') || it.filename.includes('brand'));
+                          const decode = (it: typeof paletteItem) => {
+                            if (!it) return '';
+                            try {
+                              const b64 = it.dataUrl.split(',')[1] || '';
+                              return decodeURIComponent(escape(atob(b64)));
+                            } catch {
+                              return '';
+                            }
+                          };
+                          const zipBlob = await buildBrandZip(
+                            projectName,
+                            logos,
+                            decode(paletteItem) || '品牌调色板说明',
+                            decode(copyItem) || '品牌文案规范'
+                          );
+                          downloadFile(zipBlob, `${slug}_brand_kit.zip`);
+                        }
+                      }}
                     >
                       <div className="flex justify-between items-center">
-                        <span className="text-vt-sm text-pixel-text-primary">{pkg.name}</span>
+                        <div className="flex items-center gap-2">
+                          <Package className="w-4 h-4 text-pixel-neon-pink" />
+                          <span className="text-vt-sm text-pixel-text-primary">{pkg.name}</span>
+                        </div>
                         <span className="text-pixel-xs text-pixel-text-muted">
                           {pkg.fileCount} 个文件 · {pkg.sizeKB}KB
                         </span>
@@ -1244,32 +1348,23 @@ export default function Brand() {
                       <div className="text-pixel-xs text-pixel-text-muted mt-1">
                         {new Date(pkg.createdAt).toLocaleString('zh-CN')}
                       </div>
-                      <div className="flex gap-1 mt-2">
-                        {pkg.items.slice(0, 3).map((it) => (
-                          <PixelButton
+                      <div className="flex gap-1 mt-2 flex-wrap">
+                        {pkg.items.slice(0, 4).map((it) => (
+                          <div
                             key={it.filename}
-                            size="sm"
-                            variant="ghost"
-                            className="flex-1"
-                            onClick={() => {
-                              if (it.dataUrl.startsWith('data:')) {
-                                const parts = it.dataUrl.split(',');
-                                const mime = parts[0].match(/:(.*?);/)?.[1] || '';
-                                const binary = atob(parts[1] || '');
-                                const arr = new Uint8Array(binary.length);
-                                for (let i = 0; i < binary.length; i++) arr[i] = binary.charCodeAt(i);
-                                downloadFile(new Blob([arr], { type: mime }), it.filename);
-                              } else {
-                                const a = document.createElement('a');
-                                a.href = it.dataUrl;
-                                a.download = it.filename;
-                                a.click();
-                              }
-                            }}
+                            className="chip-pixel bg-pixel-card text-pixel-xs text-pixel-text-secondary pointer-events-none"
                           >
                             {it.filename.split('.').pop()}
-                          </PixelButton>
+                          </div>
                         ))}
+                        {pkg.items.length > 4 && (
+                          <div className="chip-pixel bg-pixel-surface text-pixel-xs text-pixel-text-muted pointer-events-none">
+                            +{pkg.items.length - 4}
+                          </div>
+                        )}
+                      </div>
+                      <div className="mt-2 text-pixel-xs text-pixel-neon-cyan opacity-80">
+                        ▸ 点击下载整个 ZIP 品牌包
                       </div>
                     </div>
                   ))}

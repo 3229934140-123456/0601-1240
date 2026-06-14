@@ -2,18 +2,23 @@ import JSZip from 'jszip';
 import type { ExportItem, ReleaseChecklistItem } from '@/types';
 import { PLATFORM_SPECS } from '@/data/ratios';
 
-const generatePixelPattern = (width: number, height: number, colors: string[], type: string): string => {
+const renderPixelArtToCanvas = (
+  width: number,
+  height: number,
+  colors: string[],
+  type: string
+): HTMLCanvasElement => {
   const canvas = document.createElement('canvas');
   canvas.width = width;
   canvas.height = height;
   const ctx = canvas.getContext('2d');
-  if (!ctx) return '';
+  if (!ctx) return canvas;
 
   ctx.fillStyle = colors[colors.length - 1] || '#2D1B4E';
   ctx.fillRect(0, 0, width, height);
 
   const pixelSize = Math.max(4, Math.floor(Math.min(width, height) / 32));
-  
+
   for (let y = 0; y < height; y += pixelSize) {
     for (let x = 0; x < width; x += pixelSize) {
       if (Math.random() > 0.7) {
@@ -45,10 +50,10 @@ const generatePixelPattern = (width: number, height: number, colors: string[], t
     const titleSize = Math.floor(Math.min(width * 0.08, height * 0.2));
     addPixelText('PIXEL', titleY, titleSize, '#FF6B9D');
     addPixelText('FORGE', titleY + titleSize * 1.2, titleSize, '#64FFDA');
-    
+
     const subSize = Math.floor(titleSize * 0.35);
     addPixelText('游戏名 / GAME TITLE', titleY + titleSize * 2.8, subSize, '#FFE66D');
-    
+
     for (let i = 0; i < 15; i++) {
       const sx = Math.random() * width;
       const sy = Math.random() * height;
@@ -66,10 +71,10 @@ const generatePixelPattern = (width: number, height: number, colors: string[], t
       ctx.globalAlpha = 0.5 + Math.random() * 0.5;
       ctx.fillRect(sx, sy, ssize, ssize);
     }
-    
+
     const titleSize = Math.floor(Math.min(width * 0.05, height * 0.5));
     addPixelText('GAME TITLE', Math.floor(height / 2 + titleSize / 2), titleSize, '#FFE66D');
-    
+
     const subSize = Math.floor(titleSize * 0.5);
     addPixelText('像素冒险 / 即将上线', Math.floor(height / 2 + titleSize * 1.8), subSize, '#64FFDA');
   } else if (type.includes('缩略') || type.includes('配图')) {
@@ -84,31 +89,174 @@ const generatePixelPattern = (width: number, height: number, colors: string[], t
         }
       }
     }
-    
+
     ctx.globalAlpha = 1;
     const titleSize = Math.floor(Math.min(width, height) * 0.15);
     addPixelText('GF', Math.floor(height / 2 + titleSize / 3), titleSize * 2, '#FF6B9D');
-    
+
     const subSize = Math.floor(titleSize * 0.6);
     addPixelText('游戏截图', Math.floor(height / 2 + titleSize * 2), subSize, '#64FFDA');
   }
 
   const borderSize = Math.max(4, Math.floor(Math.min(width, height) * 0.01));
   ctx.globalAlpha = 1;
-  
+
   ctx.fillStyle = '#FF6B9D';
   ctx.fillRect(0, 0, width, borderSize);
   ctx.fillRect(0, height - borderSize, width, borderSize);
   ctx.fillRect(0, 0, borderSize, height);
   ctx.fillRect(width - borderSize, 0, borderSize, height);
-  
+
   ctx.fillStyle = '#0D0B1F';
   ctx.fillRect(borderSize, borderSize, width - borderSize * 2, borderSize);
   ctx.fillRect(borderSize, height - borderSize * 2, width - borderSize * 2, borderSize);
   ctx.fillRect(borderSize, borderSize, borderSize, height - borderSize * 2);
   ctx.fillRect(width - borderSize * 2, borderSize, borderSize, height - borderSize * 2);
 
-  return canvas.toDataURL('image/png');
+  return canvas;
+};
+
+const lzwEncode = (indices: number[], minCodeSize: number): number[] => {
+  const output: number[] = [];
+  let codeSize = minCodeSize + 1;
+  let clearCode = 1 << minCodeSize;
+  let eoiCode = clearCode + 1;
+  let nextCode = eoiCode + 1;
+  let dict = new Map<string, number>();
+  const resetDict = () => {
+    dict.clear();
+    for (let i = 0; i < clearCode; i++) dict.set(String(i), i);
+    nextCode = eoiCode + 1;
+    codeSize = minCodeSize + 1;
+  };
+  resetDict();
+  let bitBuffer = 0;
+  let bitCount = 0;
+  const writeCode = (code: number) => {
+    bitBuffer |= code << bitCount;
+    bitCount += codeSize;
+    while (bitCount >= 8) {
+      output.push(bitBuffer & 0xff);
+      bitBuffer >>= 8;
+      bitCount -= 8;
+    }
+  };
+  writeCode(clearCode);
+  let w = String(indices[0]);
+  for (let i = 1; i < indices.length; i++) {
+    const k = String(indices[i]);
+    const wk = w + ',' + k;
+    if (dict.has(wk)) {
+      w = wk;
+    } else {
+      writeCode(dict.get(w)!);
+      if (nextCode < 4096) {
+        dict.set(wk, nextCode++);
+        if (nextCode > (1 << codeSize) && codeSize < 12) codeSize++;
+      } else {
+        writeCode(clearCode);
+        resetDict();
+      }
+      w = k;
+    }
+  }
+  writeCode(dict.get(w)!);
+  writeCode(eoiCode);
+  if (bitCount > 0) output.push(bitBuffer & 0xff);
+  return output;
+};
+
+const makeGif89a = (canvas: HTMLCanvasElement): { dataUrl: string; blob: Blob } => {
+  const w = canvas.width;
+  const h = canvas.height;
+  const ctx = canvas.getContext('2d')!;
+  const imgData = ctx.getImageData(0, 0, w, h).data;
+
+  const paletteMap = new Map<number, number>();
+  const paletteArr: number[] = [];
+  const pixels: number[] = [];
+
+  for (let i = 0; i < imgData.length; i += 4) {
+    const r = imgData[i], g = imgData[i + 1], b = imgData[i + 2];
+    const key = (r << 16) | (g << 8) | b;
+    let idx = paletteMap.get(key);
+    if (idx === undefined) {
+      if (paletteArr.length >= 256) {
+        let bestIdx = 0;
+        let bestDist = Infinity;
+        for (let p = 0; p < paletteArr.length; p += 3) {
+          const dr = r - paletteArr[p];
+          const dg = g - paletteArr[p + 1];
+          const db = b - paletteArr[p + 2];
+          const d = dr * dr + dg * dg + db * db;
+          if (d < bestDist) { bestDist = d; bestIdx = p / 3; }
+        }
+        idx = bestIdx;
+      } else {
+        idx = paletteArr.length / 3;
+        paletteArr.push(r, g, b);
+        paletteMap.set(key, idx);
+      }
+    }
+    pixels.push(idx);
+  }
+
+  while (paletteArr.length < 6) paletteArr.push(0);
+  let pow = 1;
+  while ((1 << pow) * 3 < paletteArr.length) pow++;
+  const colorTableSize = 1 << pow;
+  while (paletteArr.length < colorTableSize * 3) paletteArr.push(0);
+
+  const bytes: number[] = [];
+  const pushStr = (s: string) => { for (let i = 0; i < s.length; i++) bytes.push(s.charCodeAt(i) & 0xff); };
+  const pushWord = (v: number) => { bytes.push(v & 0xff); bytes.push((v >> 8) & 0xff); };
+
+  pushStr('GIF89a');
+  pushWord(w);
+  pushWord(h);
+  bytes.push(0xf0 | (pow - 1));
+  bytes.push(0);
+  bytes.push(0);
+  for (let i = 0; i < colorTableSize * 3; i++) bytes.push(paletteArr[i] & 0xff);
+  bytes.push(0x21);
+  bytes.push(0xf9);
+  bytes.push(4);
+  bytes.push(0);
+  pushWord(0);
+  bytes.push(0);
+  bytes.push(0);
+  bytes.push(0x2c);
+  pushWord(0);
+  pushWord(0);
+  pushWord(w);
+  pushWord(h);
+  bytes.push(0);
+  const minCodeSize = Math.max(2, pow);
+  bytes.push(minCodeSize);
+  const encoded = lzwEncode(pixels, minCodeSize);
+  for (let off = 0; off < encoded.length; off += 255) {
+    const chunk = encoded.slice(off, off + 255);
+    bytes.push(chunk.length);
+    for (const b of chunk) bytes.push(b);
+  }
+  bytes.push(0);
+  bytes.push(0x3b);
+
+  const ab = new Uint8Array(bytes).buffer;
+  const blob = new Blob([ab], { type: 'image/gif' });
+  let binary = '';
+  const u8 = new Uint8Array(ab);
+  for (let i = 0; i < u8.byteLength; i++) binary += String.fromCharCode(u8[i]);
+  const dataUrl = 'data:image/gif;base64,' + btoa(binary);
+  return { dataUrl, blob };
+};
+
+const dataUrlToBlob = (dataUrl: string, mime: string): Blob => {
+  const byteString = atob(dataUrl.split(',')[1]);
+  const ab = new ArrayBuffer(byteString.length);
+  const ia = new Uint8Array(ab);
+  for (let i = 0; i < byteString.length; i++) ia[i] = byteString.charCodeAt(i);
+  return new Blob([ab], { type: mime });
 };
 
 export const generateExportImage = (
@@ -120,42 +268,29 @@ export const generateExportImage = (
 ): Promise<{ dataUrl: string; blob: Blob | null }> => {
   return new Promise((resolve) => {
     const colors = ['#FF6B9D', '#64FFDA', '#FFE66D', '#FF8C42', '#2D1B4E'];
-    const dataUrl = generatePixelPattern(width, height, colors, type);
+    const canvas = renderPixelArtToCanvas(width, height, colors, type);
 
-    if (format === 'png' || format === 'gif') {
-      const byteString = atob(dataUrl.split(',')[1]);
-      const mimeString = format === 'gif' ? 'image/gif' : 'image/png';
-      const ab = new ArrayBuffer(byteString.length);
-      const ia = new Uint8Array(ab);
-      for (let i = 0; i < byteString.length; i++) {
-        ia[i] = byteString.charCodeAt(i);
-      }
-      const blob = new Blob([ab], { type: mimeString });
+    if (format === 'png') {
+      const dataUrl = canvas.toDataURL('image/png');
+      const blob = dataUrlToBlob(dataUrl, 'image/png');
       resolve({ dataUrl, blob });
     } else if (format === 'jpg') {
-      const img = new Image();
-      img.onload = () => {
-        const canvas = document.createElement('canvas');
-        canvas.width = width;
-        canvas.height = height;
-        const ctx = canvas.getContext('2d');
-        if (ctx) {
-          ctx.fillStyle = '#FFFFFF';
-          ctx.fillRect(0, 0, width, height);
-          ctx.drawImage(img, 0, 0);
-        }
-        const jpgDataUrl = canvas.toDataURL('image/jpeg', quality / 100);
-        const byteString = atob(jpgDataUrl.split(',')[1]);
-        const ab = new ArrayBuffer(byteString.length);
-        const ia = new Uint8Array(ab);
-        for (let i = 0; i < byteString.length; i++) {
-          ia[i] = byteString.charCodeAt(i);
-        }
-        const blob = new Blob([ab], { type: 'image/jpeg' });
-        resolve({ dataUrl: jpgDataUrl, blob });
-      };
-      img.src = dataUrl;
+      const whiteCanvas = document.createElement('canvas');
+      whiteCanvas.width = width;
+      whiteCanvas.height = height;
+      const wctx = whiteCanvas.getContext('2d')!;
+      wctx.fillStyle = '#FFFFFF';
+      wctx.fillRect(0, 0, width, height);
+      wctx.drawImage(canvas, 0, 0);
+      const dataUrl = whiteCanvas.toDataURL('image/jpeg', quality / 100);
+      const blob = dataUrlToBlob(dataUrl, 'image/jpeg');
+      resolve({ dataUrl, blob });
+    } else if (format === 'gif') {
+      const { dataUrl, blob } = makeGif89a(canvas);
+      resolve({ dataUrl, blob });
     } else {
+      const dataUrl = canvas.toDataURL('image/png');
+      const blob = dataUrlToBlob(dataUrl, 'image/png');
       resolve({ dataUrl, blob: null });
     }
   });
@@ -444,4 +579,74 @@ export const copyToClipboard = async (text: string): Promise<boolean> => {
       document.body.removeChild(textarea);
     }
   }
+};
+
+export interface BrandItem {
+  filename: string;
+  dataUrl: string;
+}
+
+export const buildBrandZip = async (
+  projectName: string,
+  logos: BrandItem[],
+  paletteGuide: string,
+  brandCopy: string
+): Promise<Blob> => {
+  const zip = new JSZip();
+  const safeName = projectName.replace(/[^a-zA-Z0-9\u4e00-\u9fa5_-]/g, '_');
+
+  logos.forEach((logo) => {
+    try {
+      const [meta, base64] = logo.dataUrl.split(',');
+      const mimeMatch = meta.match(/data:(.*?);base64/);
+      const mime = mimeMatch ? mimeMatch[1] : 'image/png';
+      const ext = mime === 'image/jpeg' ? 'jpg'
+        : mime === 'image/gif' ? 'gif' : 'png';
+      const byteString = atob(base64);
+      const ab = new ArrayBuffer(byteString.length);
+      const ia = new Uint8Array(ab);
+      for (let i = 0; i < byteString.length; i++) ia[i] = byteString.charCodeAt(i);
+      const filename = logo.filename.toLowerCase().endsWith(`.${ext}`)
+        ? logo.filename
+        : `${logo.filename}.${ext}`;
+      zip.file(`logos/${filename}`, new Blob([ab], { type: mime }));
+    } catch (e) {
+      console.warn('跳过品牌Logo', logo.filename, e);
+    }
+  });
+
+  zip.file('调色板说明.txt', paletteGuide);
+  zip.file('品牌文案.txt', brandCopy);
+
+  const readme = `品牌套件 / Brand Kit
+========================
+项目: ${projectName}
+生成时间: ${new Date().toLocaleString('zh-CN')}
+
+文件目录:
+  /logos/                 - Logo 变体文件（全尺寸 PNG）
+  调色板说明.txt           - 品牌色值规范
+  品牌文案.txt             - Slogan/Tagline 文案集合
+`;
+  zip.file('README.txt', readme);
+
+  return await zip.generateAsync({ type: 'blob' });
+};
+
+export const dataUrlToZipBlob = (dataUrl: string): Blob => {
+  const base64 = dataUrl.split(',')[1];
+  const byteString = atob(base64);
+  const ab = new ArrayBuffer(byteString.length);
+  const ia = new Uint8Array(ab);
+  for (let i = 0; i < byteString.length; i++) ia[i] = byteString.charCodeAt(i);
+  return new Blob([ab], { type: 'application/zip' });
+};
+
+export const zipBlobToDataUrl = (blob: Blob): Promise<string> => {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result as string);
+    reader.onerror = reject;
+    reader.readAsDataURL(blob);
+  });
 };
