@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Download,
@@ -29,12 +29,23 @@ import {
   Trash2,
   ListChecks,
   DownloadCloud,
+  XCircle as CloseIcon,
+  CheckCircle,
+  FileDown,
 } from 'lucide-react';
 import PixelButton from '@/components/ui/PixelButton';
 import PixelCard from '@/components/ui/PixelCard';
 import { PLATFORM_SPECS } from '@/data/ratios';
 import { MOCK_RELEASE_CHECKLIST } from '@/data/assets';
+import { useCurrentProject } from '@/hooks/useCurrentProject';
 import type { ExportItem, PlatformSpec, ReleaseChecklistItem } from '@/types';
+import {
+  generateExportImage,
+  downloadFile,
+  generateFilename,
+  generateReleaseChecklistContent,
+  copyToClipboard,
+} from '@/utils/export';
 
 const mockExportItems: ExportItem[] = [
   {
@@ -134,6 +145,8 @@ const platformColors: Record<string, string> = {
 };
 
 export default function ExportPage() {
+  const { projectId, currentProject } = useCurrentProject();
+  
   const [exportItems, setExportItems] = useState<ExportItem[]>(mockExportItems);
   const [checklist, setChecklist] = useState<ReleaseChecklistItem[]>(MOCK_RELEASE_CHECKLIST);
   const [selectedItems, setSelectedItems] = useState<string[]>([]);
@@ -153,6 +166,13 @@ export default function ExportPage() {
   const [exportPath, setExportPath] = useState('./exports');
   const [showCelebration, setShowCelebration] = useState(false);
   const [expandedPlatform, setExpandedPlatform] = useState<string | null>('Steam');
+  const [previewItem, setPreviewItem] = useState<ExportItem | null>(null);
+  const [exportedBlobs, setExportedBlobs] = useState<Record<string, { blob: Blob; dataUrl: string }>>({});
+  const [checklistContent, setChecklistContent] = useState<string>('');
+  const [showChecklistModal, setShowChecklistModal] = useState(false);
+  const [copySuccess, setCopySuccess] = useState<'checklist' | null>(null);
+  
+  const processingRef = useRef<Set<string>>(new Set());
 
   const totalItems = exportItems.length;
   const doneCount = exportItems.filter((i) => i.status === 'done').length;
@@ -170,27 +190,123 @@ export default function ExportPage() {
     return acc;
   }, {} as Record<string, ReleaseChecklistItem[]>);
 
-  useEffect(() => {
-    const processingItems = exportItems.filter((i) => i.status === 'processing');
-    if (processingItems.length === 0) return;
-
-    const interval = setInterval(() => {
+  const processExportItem = useCallback(async (itemId: string) => {
+    if (processingRef.current.has(itemId)) return;
+    processingRef.current.add(itemId);
+    
+    const item = exportItems.find((i) => i.id === itemId);
+    if (!item) return;
+    
+    let currentProgress = 0;
+    const progressInterval = setInterval(() => {
+      currentProgress = Math.min(currentProgress + Math.random() * 12, 98);
       setExportItems((prev) =>
-        prev.map((item) => {
-          if (item.status !== 'processing') return item;
-          const newProgress = Math.min(item.progress + Math.random() * 8, 100);
-          if (newProgress >= 100) {
-            setShowCelebration(true);
-            setTimeout(() => setShowCelebration(false), 2000);
-            return { ...item, status: 'done' as const, progress: 100, url: '#' };
-          }
-          return { ...item, progress: newProgress };
-        })
+        prev.map((i) =>
+          i.id === itemId && i.status === 'processing'
+            ? { ...i, progress: currentProgress }
+            : i
+        )
       );
-    }, 500);
+    }, 300);
 
-    return () => clearInterval(interval);
-  }, [exportItems]);
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 600));
+      
+      const { blob, dataUrl } = await generateExportImage(
+        item.width,
+        item.height,
+        item.format,
+        item.name,
+        quality
+      );
+
+      if (blob && dataUrl) {
+        setExportedBlobs((prev) => ({ ...prev, [itemId]: { blob, dataUrl } }));
+      }
+
+      clearInterval(progressInterval);
+      setExportItems((prev) =>
+        prev.map((i) =>
+          i.id === itemId
+            ? { ...i, status: 'done' as const, progress: 100, url: dataUrl || '#' }
+            : i
+        )
+      );
+      setShowCelebration(true);
+      setTimeout(() => setShowCelebration(false), 2000);
+    } catch (err) {
+      clearInterval(progressInterval);
+      const shouldFail = Math.random() < 0.1;
+      if (shouldFail) {
+        setExportItems((prev) =>
+          prev.map((i) =>
+            i.id === itemId
+              ? { ...i, status: 'error' as const, progress: currentProgress }
+              : i
+          )
+        );
+      } else {
+        const { blob, dataUrl } = await generateExportImage(
+          item.width,
+          item.height,
+          item.format,
+          item.name,
+          quality
+        );
+        if (blob && dataUrl) {
+          setExportedBlobs((prev) => ({ ...prev, [itemId]: { blob, dataUrl } }));
+        }
+        setExportItems((prev) =>
+          prev.map((i) =>
+            i.id === itemId
+              ? { ...i, status: 'done' as const, progress: 100, url: dataUrl || '#' }
+              : i
+          )
+        );
+      }
+    } finally {
+      processingRef.current.delete(itemId);
+    }
+  }, [exportItems, quality]);
+
+  useEffect(() => {
+    const itemsToProcess = exportItems.filter(
+      (i) => i.status === 'processing' && !processingRef.current.has(i.id)
+    );
+    itemsToProcess.forEach((item) => {
+      processExportItem(item.id);
+    });
+  }, [exportItems, processExportItem]);
+
+  useEffect(() => {
+    const initDoneItems = async () => {
+      const doneItems = exportItems.filter(
+        (i) => i.status === 'done' && !exportedBlobs[i.id]
+      );
+      for (const item of doneItems) {
+        try {
+          const { blob, dataUrl } = await generateExportImage(
+            item.width,
+            item.height,
+            item.format,
+            item.name,
+            quality
+          );
+          if (blob && dataUrl) {
+            setExportedBlobs((prev) => ({ ...prev, [item.id]: { blob, dataUrl } }));
+            setExportItems((prev) =>
+              prev.map((i) =>
+                i.id === item.id ? { ...i, url: dataUrl } : i
+              )
+            );
+          }
+        } catch (e) {
+          console.error('Init export item error', e);
+        }
+      }
+    };
+    initDoneItems();
+  }, []);
 
   const toggleSelectItem = (id: string) => {
     setSelectedItems((prev) =>
@@ -250,6 +366,62 @@ export default function ExportPage() {
       setExportPath(newPath);
     }
   };
+
+  const handleDownload = useCallback((item: ExportItem) => {
+    const exportData = exportedBlobs[item.id];
+    if (exportData?.blob) {
+      const prefix = namingPrefix || currentProject?.name?.replace(/\s+/g, '_') || 'pixelforge';
+      const filename = generateFilename(
+        prefix,
+        item.platform,
+        item.name,
+        item.format,
+        1
+      );
+      downloadFile(exportData.blob, filename);
+    }
+  }, [exportedBlobs, namingPrefix, currentProject]);
+
+  const handlePreview = useCallback((item: ExportItem) => {
+    const exportData = exportedBlobs[item.id];
+    if (exportData?.dataUrl || item.url && item.url !== '#') {
+      setPreviewItem({ ...item, url: exportData?.dataUrl || item.url });
+    }
+  }, [exportedBlobs]);
+
+  const handleDownloadSelected = useCallback(() => {
+    const itemsToDownload = exportItems.filter(
+      (i) => i.status === 'done' && (selectedItems.length === 0 || selectedItems.includes(i.id))
+    );
+    itemsToDownload.forEach((item) => {
+      setTimeout(() => handleDownload(item), 200);
+    });
+  }, [exportItems, selectedItems, handleDownload]);
+
+  const handleGenerateChecklist = useCallback(() => {
+    const projectName = currentProject?.name || 'PixelForge Project';
+    const content = generateReleaseChecklistContent(projectName, checklist, exportItems);
+    setChecklistContent(content);
+    setShowChecklistModal(true);
+  }, [currentProject, checklist, exportItems]);
+
+  const handleCopyChecklist = useCallback(async () => {
+    if (!checklistContent) return;
+    const ok = await copyToClipboard(checklistContent);
+    if (ok) {
+      setCopySuccess('checklist');
+      setTimeout(() => setCopySuccess(null), 2000);
+    }
+  }, [checklistContent]);
+
+  const handleDownloadChecklist = useCallback(() => {
+    if (!checklistContent) return;
+    const projectName = currentProject?.name?.replace(/\s+/g, '_') || 'pixelforge';
+    const blob = new Blob([checklistContent], { type: 'text/plain;charset=utf-8' });
+    downloadFile(blob, `${projectName}_release_checklist.txt`);
+  }, [checklistContent, currentProject]);
+
+  const doneCountFromExport = exportItems.filter((i) => i.status === 'done').length;
 
   const getStatusIcon = (status: ExportItem['status']) => {
     switch (status) {
@@ -393,6 +565,12 @@ export default function ExportPage() {
             </p>
           </div>
           <div className="flex items-center gap-3">
+            {doneCountFromExport > 0 && (
+              <PixelButton variant="ghost" size="md" onClick={handleDownloadSelected}>
+                <Download className="w-4 h-4 mr-2" />
+                {selectedItems.length > 0 ? `下载选中(${selectedItems.filter((id) => exportItems.find((i) => i.id === id)?.status === 'done').length})` : `下载全部完成(${doneCountFromExport})`}
+              </PixelButton>
+            )}
             <PixelButton variant="secondary" size="md" onClick={exportAll}>
               <Play className="w-4 h-4 mr-2" />
               全部导出
@@ -407,7 +585,9 @@ export default function ExportPage() {
                 <Package className="w-5 h-5 text-pixel-neon-cyan" />
                 <div>
                   <div className="text-pixel-xs text-pixel-text-muted">项目</div>
-                  <div className="text-vt-lg text-pixel-text-primary">像素冒险 - 商店页素材包</div>
+                  <div className="text-vt-lg text-pixel-text-primary">
+                    {currentProject?.name || '像素冒险 - 商店页素材包'}
+                  </div>
                 </div>
               </div>
               <div className="w-px h-10 bg-pixel-border" />
@@ -664,11 +844,11 @@ export default function ExportPage() {
                             )}
                             {item.status === 'done' && (
                               <>
-                                <PixelButton variant="ghost" size="sm">
+                                <PixelButton variant="ghost" size="sm" onClick={() => handlePreview(item)}>
                                   <Eye className="w-3 h-3 mr-1" />
                                   预览
                                 </PixelButton>
-                                <PixelButton variant="secondary" size="sm">
+                                <PixelButton variant="secondary" size="sm" onClick={() => handleDownload(item)}>
                                   <Download className="w-3 h-3 mr-1" />
                                   下载
                                 </PixelButton>
@@ -870,11 +1050,11 @@ export default function ExportPage() {
                   <h2 className="text-pixel-sm text-pixel-neon-yellow">发布清单</h2>
                 </div>
                 <div className="flex gap-2">
-                  <PixelButton variant="ghost" size="sm">
+                  <PixelButton variant="ghost" size="sm" onClick={handleGenerateChecklist}>
                     <Sparkles className="w-3 h-3 mr-1" />
                     生成
                   </PixelButton>
-                  <PixelButton variant="ghost" size="sm">
+                  <PixelButton variant="ghost" size="sm" onClick={handleGenerateChecklist}>
                     <Share2 className="w-3 h-3 mr-1" />
                     分享
                   </PixelButton>
@@ -1028,6 +1208,124 @@ export default function ExportPage() {
           </div>
         </PixelCard>
       </div>
+
+      <AnimatePresence>
+        {previewItem && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/85 flex items-center justify-center z-50 p-8"
+            onClick={() => setPreviewItem(null)}
+          >
+            <motion.div
+              initial={{ scale: 0.85, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.85, opacity: 0 }}
+              className="max-w-[90vw] max-h-[90vh] flex flex-col"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <PixelCard hover={false} className="flex flex-col max-h-full">
+                <div className="flex items-center justify-between p-4 border-b-4 border-pixel-border">
+                  <div>
+                    <h3 className="text-pixel-md text-pixel-neon-cyan font-pixel mb-1">
+                      {previewItem.name}.{previewItem.format}
+                    </h3>
+                    <p className="text-pixel-xs text-pixel-text-muted">
+                      {previewItem.platform} • {previewItem.width} × {previewItem.height} • {previewItem.format.toUpperCase()}
+                    </p>
+                  </div>
+                  <PixelButton variant="ghost" size="sm" onClick={() => setPreviewItem(null)}>
+                    <CloseIcon className="w-4 h-4" />
+                  </PixelButton>
+                </div>
+                <div className="flex-1 overflow-auto p-6 bg-pixel-bg flex items-center justify-center">
+                  <img
+                    src={previewItem.url}
+                    alt={previewItem.name}
+                    className="max-w-full max-h-[65vh] border-4 border-pixel-border"
+                    style={{ imageRendering: 'pixelated' }}
+                  />
+                </div>
+                <div className="flex justify-end gap-2 p-4 border-t-4 border-pixel-border bg-pixel-surface">
+                  <PixelButton variant="ghost" size="sm" onClick={() => handlePreview({...previewItem})}>
+                    <Eye className="w-4 h-4 mr-2" />
+                    预览
+                  </PixelButton>
+                  <PixelButton variant="secondary" size="sm" onClick={() => handleDownload(previewItem)}>
+                    <Download className="w-4 h-4 mr-2" />
+                    下载此图
+                  </PixelButton>
+                </div>
+              </PixelCard>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {showChecklistModal && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/85 flex items-center justify-center z-50 p-8"
+            onClick={() => setShowChecklistModal(false)}
+          >
+            <motion.div
+              initial={{ scale: 0.85, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.85, opacity: 0 }}
+              className="w-full max-w-3xl max-h-[90vh] flex flex-col"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <PixelCard hover={false} className="flex flex-col max-h-full">
+                <div className="flex items-center justify-between p-4 border-b-4 border-pixel-border">
+                  <div>
+                    <h3 className="text-pixel-md text-pixel-neon-yellow font-pixel mb-1">
+                      发布清单 / Release Checklist
+                    </h3>
+                    <p className="text-pixel-xs text-pixel-text-muted">
+                      {currentProject?.name || 'PixelForge Project'}
+                    </p>
+                  </div>
+                  <PixelButton variant="ghost" size="sm" onClick={() => setShowChecklistModal(false)}>
+                    <CloseIcon className="w-4 h-4" />
+                  </PixelButton>
+                </div>
+                <div className="flex-1 overflow-auto p-6 bg-pixel-bg">
+                  <pre className="text-vt-sm text-pixel-text-primary whitespace-pre-wrap font-mono leading-relaxed bg-pixel-card border-4 border-pixel-border p-4">
+                    {checklistContent || '清单内容正在生成...'}
+                  </pre>
+                </div>
+                <div className="flex justify-end gap-2 p-4 border-t-4 border-pixel-border bg-pixel-surface">
+                  <PixelButton
+                    variant={copySuccess === 'checklist' ? 'primary' : 'ghost'}
+                    size="sm"
+                    onClick={handleCopyChecklist}
+                  >
+                    {copySuccess === 'checklist' ? (
+                      <>
+                        <CheckCircle className="w-4 h-4 mr-2" />
+                        已复制到剪贴板!
+                      </>
+                    ) : (
+                      <>
+                        <Copy className="w-4 h-4 mr-2" />
+                        复制文本
+                      </>
+                    )}
+                  </PixelButton>
+                  <PixelButton variant="secondary" size="sm" onClick={handleDownloadChecklist}>
+                    <FileDown className="w-4 h-4 mr-2" />
+                    下载 TXT
+                  </PixelButton>
+                </div>
+              </PixelCard>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

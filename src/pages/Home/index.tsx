@@ -1,4 +1,5 @@
 import { motion, AnimatePresence } from 'framer-motion';
+import { useNavigate } from 'react-router-dom';
 import { useProjectStore } from '@/store/projectStore';
 import PixelButton from '@/components/ui/PixelButton';
 import PixelCard from '@/components/ui/PixelCard';
@@ -93,15 +94,18 @@ const formatTime = (timestamp: number) => {
 };
 
 export default function Home() {
+  const navigate = useNavigate();
   const { projects, createProject, setCurrentProject } = useProjectStore();
 
   const handleCreateProject = (ratio: string = '16:9') => {
     const newProject = createProject('未命名项目', ratio);
     setCurrentProject(newProject.id);
+    navigate(`/poster/${newProject.id}`);
   };
 
   const handleProjectClick = (projectId: string) => {
     setCurrentProject(projectId);
+    navigate(`/poster/${projectId}`);
   };
 
   const recentProjects = projects.slice(0, 4);
@@ -201,16 +205,16 @@ export default function Home() {
           <div className="max-w-7xl mx-auto relative">
             <motion.div
               className="text-center mb-12"
-              initial={{ opacity: 0, y: 30 }}
+              initial={{ opacity: 1, y: 0 }}
               animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.6 }}
+              transition={{ duration: 0.2 }}
             >
               <motion.div
                 className="inline-flex items-center gap-2 mb-6 px-4 py-2 bg-pixel-card border-4 border-pixel-border"
                 style={{ boxShadow: '4px 4px 0 0 #0D0B1F' }}
-                initial={{ scale: 0.8, opacity: 0 }}
+                initial={{ scale: 1, opacity: 1 }}
                 animate={{ scale: 1, opacity: 1 }}
-                transition={{ delay: 0.3 }}
+                transition={{ delay: 0 }}
               >
                 <Sparkles className="w-4 h-4 text-pixel-neon-yellow" />
                 <span className="font-pixel text-pixel-xs text-pixel-neon-yellow">
@@ -305,8 +309,8 @@ export default function Home() {
             <motion.div
               className="flex items-center justify-between mb-8"
               initial={{ opacity: 0, x: -20 }}
-              whileInView={{ opacity: 1, x: 0 }}
-              viewport={{ once: true }}
+              animate={{ opacity: 1, x: 0 }}
+              transition={{ delay: 1.0 }}
             >
               <div className="flex items-center gap-3">
                 <Clock className="w-5 h-5 text-pixel-neon-pink" />
@@ -328,9 +332,8 @@ export default function Home() {
                   <motion.div
                     key={project.id}
                     initial={{ opacity: 0, y: 30 }}
-                    whileInView={{ opacity: 1, y: 0 }}
-                    viewport={{ once: true }}
-                    transition={{ delay: index * 0.1 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: 1.1 + index * 0.1 }}
                     whileHover={{ y: -4, x: -4 }}
                   >
                     <PixelCard
@@ -446,8 +449,8 @@ export default function Home() {
             <motion.div
               className="flex items-center gap-3 mb-8"
               initial={{ opacity: 0, x: -20 }}
-              whileInView={{ opacity: 1, x: 0 }}
-              viewport={{ once: true }}
+              animate={{ opacity: 1, x: 0 }}
+              transition={{ delay: 1.6 }}
             >
               <Bell className="w-5 h-5 text-pixel-neon-cyan" />
               <h2 className="font-pixel text-pixel-lg text-pixel-text-primary">
@@ -460,9 +463,8 @@ export default function Home() {
                 <motion.div
                   key={activity.id}
                   initial={{ opacity: 0, x: index % 2 === 0 ? -20 : 20 }}
-                  whileInView={{ opacity: 1, x: 0 }}
-                  viewport={{ once: true }}
-                  transition={{ delay: index * 0.1 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  transition={{ delay: 1.7 + index * 0.1 }}
                 >
                   <PixelCard className="p-4" hover={false}>
                     <div className="flex items-start gap-4">

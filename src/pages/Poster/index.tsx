@@ -6,10 +6,12 @@ import { useCanvasStore } from '@/store/canvasStore';
 import { useProjectStore } from '@/store/projectStore';
 import { CANVAS_RATIOS } from '@/data/ratios';
 import { PRESET_PALETTES } from '@/data/palettes';
+import { useCurrentProject } from '@/hooks/useCurrentProject';
 import { cn } from '@/lib/utils';
 import type { CanvasElement, TextElementData, ShapeElementData, BorderElementData } from '@/types';
 
 const PosterEditor: React.FC = () => {
+  const { projectId, currentProject } = useCurrentProject();
   const {
     width: canvasWidth,
     height: canvasHeight,
@@ -35,10 +37,10 @@ const PosterEditor: React.FC = () => {
   } = useCanvasStore();
 
   const {
-    getCurrentProject,
     saveVersion,
     addComment,
     updatePalette,
+    addCollaborator,
   } = useProjectStore();
 
   const [activeLeftTab, setActiveLeftTab] = useState<'elements' | 'layers'>('elements');
@@ -60,7 +62,6 @@ const PosterEditor: React.FC = () => {
   const [commentPosition, setCommentPosition] = useState<{ x: number; y: number } | null>(null);
 
   const canvasRef = useRef<HTMLDivElement>(null);
-  const currentProject = getCurrentProject();
   const selectedElement = elements.find((el) => el.id === selectedId);
 
   const getDisplayScale = () => {
@@ -238,8 +239,8 @@ const PosterEditor: React.FC = () => {
 
   const handleApplyPalette = (paletteId: string) => {
     const palette = PRESET_PALETTES.find((p) => p.id === paletteId);
-    if (palette && currentProject) {
-      updatePalette(currentProject.id, palette);
+    if (palette && projectId) {
+      updatePalette(projectId, palette);
     }
   };
 
@@ -252,16 +253,16 @@ const PosterEditor: React.FC = () => {
   };
 
   const handleSaveVersion = () => {
-    if (versionName && currentProject) {
-      saveVersion(currentProject.id, versionName);
+    if (versionName && projectId) {
+      saveVersion(projectId, versionName);
       setVersionName('');
       setShowVersionModal(false);
     }
   };
 
   const handleAddComment = () => {
-    if (commentText && commentPosition && currentProject) {
-      addComment(currentProject.id, {
+    if (commentText && commentPosition && projectId) {
+      addComment(projectId, {
         content: commentText,
         position: commentPosition,
         author: '我',
@@ -271,6 +272,19 @@ const PosterEditor: React.FC = () => {
       setCommentText('');
       setCommentPosition(null);
       setShowCommentMode(false);
+    }
+  };
+
+  const handleAddCollaborator = () => {
+    if (collabEmail && projectId) {
+      const colors = ['#FF6B9D', '#64FFDA', '#FFE66D', '#C77DFF'];
+      addCollaborator(projectId, {
+        name: collabEmail.split('@')[0] || '协作者',
+        avatar: '',
+        role: 'editor',
+      });
+      setCollabEmail('');
+      setShowCollabModal(false);
     }
   };
 
@@ -1403,17 +1417,7 @@ const PosterEditor: React.FC = () => {
                   <PixelButton size="sm" variant="ghost" onClick={() => setShowCollabModal(false)}>
                     取消
                   </PixelButton>
-                  <PixelButton size="sm" variant="secondary" onClick={() => {
-                    if (collabEmail && currentProject) {
-                      useProjectStore.getState().addCollaborator(currentProject.id, {
-                        name: collabEmail.split('@')[0],
-                        avatar: '',
-                        role: 'editor',
-                      });
-                      setCollabEmail('');
-                      setShowCollabModal(false);
-                    }
-                  }} disabled={!collabEmail}>
+                  <PixelButton size="sm" variant="secondary" onClick={handleAddCollaborator} disabled={!collabEmail}>
                     发送邀请
                   </PixelButton>
                 </div>

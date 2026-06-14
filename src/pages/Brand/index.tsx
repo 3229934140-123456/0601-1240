@@ -23,6 +23,7 @@ import {
 import PixelButton from '@/components/ui/PixelButton';
 import PixelCard from '@/components/ui/PixelCard';
 import { useProjectStore } from '@/store/projectStore';
+import { useCurrentProject } from '@/hooks/useCurrentProject';
 import { PRESET_PALETTES } from '@/data/palettes';
 import type { ColorPalette } from '@/types';
 import { cn } from '@/lib/utils';
@@ -48,8 +49,8 @@ const FONT_SIZES = [
 ];
 
 export default function Brand() {
-  const { projects, currentProjectId, updatePalette, getCurrentProject } = useProjectStore();
-  const currentProject = getCurrentProject();
+  const { projects, updatePalette } = useProjectStore();
+  const { projectId, currentProject } = useCurrentProject();
 
   const [selectedPalette, setSelectedPalette] = useState<ColorPalette>(
     currentProject?.palette || PRESET_PALETTES[0]
@@ -86,12 +87,12 @@ export default function Brand() {
   };
 
   const handleSavePalette = () => {
-    if (currentProjectId) {
+    if (projectId) {
       const newPalette: ColorPalette = {
         ...selectedPalette,
         colors: customColors,
       };
-      updatePalette(currentProjectId, newPalette);
+      updatePalette(projectId, newPalette);
     }
   };
 
