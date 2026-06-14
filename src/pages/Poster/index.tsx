@@ -256,7 +256,6 @@ const PosterEditor: React.FC = () => {
     if (versionName && projectId) {
       saveVersion(projectId, versionName);
       setVersionName('');
-      setShowVersionModal(false);
     }
   };
 
@@ -270,21 +269,17 @@ const PosterEditor: React.FC = () => {
         resolved: false,
       });
       setCommentText('');
-      setCommentPosition(null);
-      setShowCommentMode(false);
     }
   };
 
   const handleAddCollaborator = () => {
     if (collabEmail && projectId) {
-      const colors = ['#FF6B9D', '#64FFDA', '#FFE66D', '#C77DFF'];
       addCollaborator(projectId, {
         name: collabEmail.split('@')[0] || '协作者',
         avatar: '',
         role: 'editor',
       });
       setCollabEmail('');
-      setShowCollabModal(false);
     }
   };
 
@@ -1349,11 +1344,12 @@ const PosterEditor: React.FC = () => {
                 <h2 className="text-pixel-lg text-pixel-neon-pink mb-4 font-pixel pixel-text-shadow">保存版本</h2>
                 <input
                   type="text"
-                  placeholder="版本名称..."
+                  placeholder="版本名称... (保存后可继续输入下一条)"
                   className="input-pixel mb-4"
                   value={versionName}
                   onChange={(e) => setVersionName(e.target.value)}
                   autoFocus
+                  key={`version-input-${currentProject?.versions?.length || 0}`}
                 />
                 <div className="flex gap-2 justify-end">
                   <PixelButton size="sm" variant="ghost" onClick={() => setShowVersionModal(false)}>
@@ -1368,7 +1364,7 @@ const PosterEditor: React.FC = () => {
                   <div className="mt-6">
                     <h3 className="text-pixel-xs text-pixel-neon-cyan mb-2 font-pixel">历史版本</h3>
                     <div className="max-h-40 overflow-y-auto space-y-2">
-                      {currentProject.versions.slice().reverse().map((v) => (
+                      {currentProject.versions.map((v) => (
                         <div key={v.id} className="p-2 bg-pixel-surface border-2 border-pixel-border">
                           <div className="flex justify-between items-center">
                             <span className="text-vt-sm">{v.name}</span>
@@ -1407,11 +1403,12 @@ const PosterEditor: React.FC = () => {
                 <h2 className="text-pixel-lg text-pixel-neon-cyan mb-4 font-pixel pixel-text-shadow">邀请协作</h2>
                 <input
                   type="email"
-                  placeholder="输入协作者邮箱..."
+                  placeholder="输入邮箱... (发送后可继续邀请下一位)"
                   className="input-pixel mb-4"
                   value={collabEmail}
                   onChange={(e) => setCollabEmail(e.target.value)}
                   autoFocus
+                  key={`collab-input-${currentProject?.collaborators?.length || 0}`}
                 />
                 <div className="flex gap-2 justify-end">
                   <PixelButton size="sm" variant="ghost" onClick={() => setShowCollabModal(false)}>

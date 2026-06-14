@@ -1,3 +1,4 @@
+import JSZip from 'jszip';
 import type { ExportItem, ReleaseChecklistItem } from '@/types';
 import { PLATFORM_SPECS } from '@/data/ratios';
 
@@ -186,6 +187,32 @@ export const generateFilename = (
   return `${prefix}_${safePlatform}_${safeType}${scaleSuffix}${suffix}.${format}`;
 };
 
+export const syncChecklistFromExports = (
+  checklist: ReleaseChecklistItem[],
+  exportItems: ExportItem[]
+): ReleaseChecklistItem[] => {
+  const doneSet = new Map<string, ExportItem>();
+  for (const exp of exportItems.filter((e) => e.status === 'done')) {
+    const key = `${exp.platform}|${exp.name}`.toLowerCase();
+    doneSet.set(key, exp);
+  }
+  return checklist.map((item) => {
+    if (item.done) return item;
+    const exactKey = `${item.platform}|${item.title}`.toLowerCase();
+    if (doneSet.has(exactKey)) return { ...item, done: true };
+    for (const [key] of doneSet.entries()) {
+      if (
+        key.includes(item.platform.toLowerCase()) &&
+        (item.title.split(/\s+/).some((w) => key.includes(w.toLowerCase())) ||
+          Array.from(key).filter((c) => item.title.toLowerCase().includes(c)).length >= 4)
+      ) {
+        return { ...item, done: true };
+      }
+    }
+    return item;
+  });
+};
+
 export const generateReleaseChecklistContent = (
   projectName: string,
   items: ReleaseChecklistItem[],
@@ -193,6 +220,7 @@ export const generateReleaseChecklistContent = (
 ): string => {
   const now = new Date();
   const dateStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+  const timeStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
   
   const completedRequired = items.filter(i => i.required && i.done).length;
   const totalRequired = items.filter(i => i.required).length;
@@ -205,59 +233,105 @@ export const generateReleaseChecklistContent = (
     return acc;
   }, {} as Record<string, ReleaseChecklistItem[]>);
 
-  let content = '';
-  content += '='.repeat(60) + '\n';
-  content += '          PIXEL FORGE - 游戏发布清单\n';
-  content += '='.repeat(60) + '\n\n';
-  content += `项目名称: ${projectName}\n`;
-  content += `生成日期: ${dateStr}\n`;
-  content += `导出文件: ${exportItems.length} 个\n\n`;
-  
-  content += '-'.repeat(60) + '\n';
-  content += '进度概览\n';
-  content += '-'.repeat(60) + '\n';
-  content += `必选项完成: ${completedRequired} / ${totalRequired} (${Math.round(completedRequired / totalRequired * 100)}%)\n`;
-  content += `整体完成度: ${completedAll} / ${totalAll} (${Math.round(completedAll / totalAll * 100)}%)\n\n`;
-
-  content += '-'.repeat(60) + '\n';
-  content += '详细清单\n';
-  content += '-'.repeat(60) + '\n\n';
-
-  for (const [platform, platformItems] of Object.entries(platformGroups)) {
-    content += `【${platform}】\n`;
-    content += '-'.repeat(40) + '\n';
-    
-    for (const item of platformItems) {
-      const checkbox = item.done ? '[✓]' : '[ ]';
-      const required = item.required ? ' *必需*' : '  可选';
-      content += `  ${checkbox}${required} ${item.title}\n`;
-      content += `           ${item.description}\n`;
-    }
-    content += '\n';
-  }
-
-  content += '-'.repeat(60) + '\n';
-  content += '导出文件列表\n';
-  content += '-'.repeat(60) + '\n\n';
-
   const platformExports = exportItems.reduce((acc, item) => {
     if (!acc[item.platform]) acc[item.platform] = [];
     acc[item.platform].push(item);
     return acc;
   }, {} as Record<string, ExportItem[]>);
 
-  for (const [platform, items] of Object.entries(platformExports)) {
-    content += `  ${platform} (${items.length}个):\n`;
-    for (const item of items) {
-      const status = item.status === 'done' ? '✓' : item.status === 'error' ? '✗' : '○';
-      content += `    ${status} ${item.name}.${item.format} (${item.width}x${item.height})\n`;
+  const missingRequired = items.filter((i) => i.required && !i.done);
+  const missingOptional = items.filter((i) => !i.required && !i.done);
+
+  let content = '';
+  content += '='.repeat(64) + '\n';
+  content += '          ★  PIXEL FORGE - 游戏发布清单  ★\n';
+  content += '='.repeat(64) + '\n\n';
+  content += `▸ 项目名称: ${projectName}\n`;
+  content += `▸ 生成日期: ${dateStr} ${timeStr}\n`;
+  content += `▸ 导出文件: ${exportItems.filter((e) => e.status === 'done').length} / ${exportItems.length} 个已完成\n\n`;
+  
+  content += '-'.repeat(64) + '\n';
+  content += '【进度概览】\n';
+  content += '-'.repeat(64) + '\n';
+  const barLen = 30;
+  const filledLen = Math.round((completedRequired / Math.max(1, totalRequired)) * barLen);
+  const progressBar = '█'.repeat(filledLen) + '░'.repeat(barLen - filledLen);
+  content += `必选项: ${progressBar} ${completedRequired}/${totalRequired} (${Math.round(completedRequired / Math.max(1, totalRequired) * 100)}%)\n`;
+  const filledAll = Math.round((completedAll / Math.max(1, totalAll)) * barLen);
+  const progressBarAll = '█'.repeat(filledAll) + '░'.repeat(barLen - filledAll);
+  content += `整体进度: ${progressBarAll} ${completedAll}/${totalAll} (${Math.round(completedAll / Math.max(1, totalAll) * 100)}%)\n\n`;
+
+  if (missingRequired.length > 0 || missingOptional.length > 0) {
+    content += '-'.repeat(64) + '\n';
+    content += '【⚠ 缺失项提醒】\n';
+    content += '-'.repeat(64) + '\n';
+    if (missingRequired.length > 0) {
+      content += `  ✗ 必需缺失 (${missingRequired.length} 个):\n`;
+      for (const m of missingRequired) {
+        content += `      → [${m.platform}] ${m.title} - ${m.description}\n`;
+      }
+    }
+    if (missingOptional.length > 0) {
+      content += `  ○ 可选缺失 (${missingOptional.length} 个):\n`;
+      for (const m of missingOptional) {
+        content += `      → [${m.platform}] ${m.title} - ${m.description}\n`;
+      }
     }
     content += '\n';
   }
 
-  content += '-'.repeat(60) + '\n';
-  content += '平台尺寸规范参考\n';
-  content += '-'.repeat(60) + '\n\n';
+  content += '-'.repeat(64) + '\n';
+  content += '【详细清单 (含对应文件名/尺寸)】\n';
+  content += '-'.repeat(64) + '\n\n';
+
+  for (const [platform, platformItems] of Object.entries(platformGroups)) {
+    content += `┌─ ${platform} ─────────────────────\n`;
+    
+    for (const item of platformItems) {
+      const checkbox = item.done ? '✓' : '✗';
+      const tag = item.required ? '必需' : '可选';
+      const color = item.done ? '' : (item.required ? ' 【紧急】' : '');
+      content += `│ ${checkbox} [${tag}] ${item.title}${color}\n`;
+      content += `│      说明: ${item.description}\n`;
+      
+      const related = exportItems.filter(
+        (e) => e.platform === platform &&
+          (e.name.toLowerCase().includes(item.title.toLowerCase().split(/\s+/)[0] || '') ||
+            item.title.toLowerCase().includes(e.name.toLowerCase().split(/\s+/)[0] || ''))
+      );
+      if (related.length > 0) {
+        content += `│      文件:\n`;
+        for (const f of related) {
+          const fstatus = f.status === 'done' ? '✓' : f.status === 'error' ? '✗' : '○';
+          content += `│         ${fstatus} 文件名: ${f.name}.${f.format}  尺寸: ${f.width}×${f.height}\n`;
+        }
+      } else if (item.done) {
+        content += `│      状态: 已完成，但未匹配到具体导出文件\n`;
+      }
+    }
+    content += '└\n\n';
+  }
+
+  content += '-'.repeat(64) + '\n';
+  content += '【导出文件索引 (可直接发给发行同事)】\n';
+  content += '-'.repeat(64) + '\n\n';
+
+  for (const [platform, items] of Object.entries(platformExports)) {
+    const doneCount = items.filter((i) => i.status === 'done').length;
+    content += `◆ ${platform} (${doneCount}/${items.length} 完成)\n`;
+    content += `  ${'─'.repeat(36)}\n`;
+    for (const item of items) {
+      const status = item.status === 'done' ? '[OK]' : item.status === 'error' ? '[FF]' : '[..]';
+      const ext = item.format.toUpperCase().padEnd(4, ' ');
+      const sizeStr = `${item.width}×${item.height}`.padEnd(14, ' ');
+      content += `  ${status} ${ext} ${sizeStr} ${item.name}.${item.format}\n`;
+    }
+    content += '\n';
+  }
+
+  content += '-'.repeat(64) + '\n';
+  content += '【平台尺寸规范参考】\n';
+  content += '-'.repeat(64) + '\n\n';
 
   const platformSpecGroups = PLATFORM_SPECS.reduce((acc, spec) => {
     if (!acc[spec.platform]) acc[spec.platform] = [];
@@ -266,19 +340,88 @@ export const generateReleaseChecklistContent = (
   }, {} as Record<string, typeof PLATFORM_SPECS>);
 
   for (const [platform, specs] of Object.entries(platformSpecGroups)) {
-    content += `  ${platform}:\n`;
+    content += `  ▸ ${platform}:\n`;
     for (const spec of specs) {
-      const required = spec.required ? ' [必需]' : ' [可选]';
-      content += `    • ${spec.type}: ${spec.width}x${spec.height}${required}\n`;
+      const required = spec.required ? '★必需' : ' 可选';
+      content += `      ${required}  ${spec.type.padEnd(14, ' ')}  ${spec.width}×${spec.height}\n`;
     }
     content += '\n';
   }
 
-  content += '='.repeat(60) + '\n';
-  content += '     本清单由 PixelForge 自动生成\n';
-  content += '='.repeat(60) + '\n';
+  content += '='.repeat(64) + '\n';
+  content += `  生成工具: PixelForge  发送前请核对以上 ${exportItems.filter((e) => e.status === 'done').length} 个文件\n`;
+  content += '='.repeat(64) + '\n';
 
   return content;
+};
+
+export interface BuildZipOptions {
+  prefix: string;
+  projectName: string;
+  checklistContent: string;
+  checklist: ReleaseChecklistItem[];
+}
+
+export const buildExportZip = async (
+  items: ExportItem[],
+  blobs: Record<string, { blob: Blob; dataUrl: string }>,
+  options: BuildZipOptions
+): Promise<Blob> => {
+  const zip = new JSZip();
+  const safeProject = options.projectName.replace(/[^a-zA-Z0-9\u4e00-\u9fa5_-]/g, '_');
+
+  const byPlatform = items.reduce((acc, item) => {
+    if (item.status !== 'done' || !blobs[item.id]) return acc;
+    if (!acc[item.platform]) acc[item.platform] = [];
+    acc[item.platform].push(item);
+    return acc;
+  }, {} as Record<string, ExportItem[]>);
+
+  let idx = 0;
+  for (const [platform, platItems] of Object.entries(byPlatform)) {
+    const safePlat = platform.replace(/[^a-zA-Z0-9_-]/g, '_');
+    const folder = zip.folder(safePlat);
+    if (!folder) continue;
+    for (const item of platItems) {
+      const data = blobs[item.id];
+      if (!data?.blob) continue;
+      const filename = generateFilename(options.prefix || safeProject, platform, item.name, item.format, 1, idx++);
+      folder.file(filename, data.blob);
+    }
+  }
+
+  const readme = `PIXEL FORGE - 项目打包清单
+===============================
+项目: ${options.projectName}
+导出数量: ${items.filter((i) => i.status === 'done').length} 个文件
+生成时间: ${new Date().toLocaleString('zh-CN')}
+
+文件夹说明:
+  每个平台一个子文件夹，内部为对应尺寸的导出图片。
+  文件命名规则: {前缀}_{平台}_{类型}_{序号}.{格式}
+
+详细清单请参考 release_checklist.txt
+`;
+
+  zip.file('README.txt', readme);
+  zip.file('release_checklist.txt', options.checklistContent);
+
+  const summary = `文件清单（发行同事用）
+======================
+平台,类型,文件名,尺寸,格式,状态
+` + items.map((i) => [
+    i.platform,
+    i.name,
+    `${i.name}.${i.format}`,
+    `${i.width}x${i.height}`,
+    i.format.toUpperCase(),
+    i.status === 'done' ? '完成' : i.status,
+  ].join(',')).join('\n');
+  zip.file('文件清单.CSV', '\ufeff' + summary);
+
+  return await zip.generateAsync({ type: 'blob' }, (metadata) => {
+    console.log('[PixelForge] ZIP 进度:', metadata.percent.toFixed(1) + '%');
+  });
 };
 
 export const copyToClipboard = async (text: string): Promise<boolean> => {

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
@@ -12,22 +12,35 @@ import {
   Menu,
   X,
   Sparkles,
+  Folder,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { useProjectStore } from '@/store/projectStore';
 
-const navItems = [
-  { path: '/', icon: Home, label: '首页' },
-  { path: '/library', icon: Image, label: '素材库' },
-  { path: '/poster/project-1', icon: Edit3, label: '海报编辑' },
-  { path: '/character/project-1', icon: User, label: '角色展示' },
-  { path: '/animation/project-1', icon: Film, label: '动图生成' },
-  { path: '/brand/project-1', icon: Palette, label: '品牌套件' },
-  { path: '/export/project-1', icon: Download, label: '导出中心' },
+const staticNavItems = [
+  { path: '/', icon: Home, label: '首页', dynamic: false },
+  { path: '/library', icon: Image, label: '素材库', dynamic: false },
+  { path: '/poster', icon: Edit3, label: '海报编辑', dynamic: true },
+  { path: '/character', icon: User, label: '角色展示', dynamic: true },
+  { path: '/animation', icon: Film, label: '动图生成', dynamic: true },
+  { path: '/brand', icon: Palette, label: '品牌套件', dynamic: true },
+  { path: '/export', icon: Download, label: '导出中心', dynamic: true },
 ];
 
 export default function Navbar() {
   const location = useLocation();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const { lastSelectedProjectId, getCurrentProject } = useProjectStore();
+  const currentProject = getCurrentProject();
+
+  const navItems = useMemo(() => {
+    return staticNavItems.map((item) => {
+      if (item.dynamic && lastSelectedProjectId) {
+        return { ...item, path: `${item.path}/${lastSelectedProjectId}` };
+      }
+      return item;
+    });
+  }, [lastSelectedProjectId]);
 
   const getCurrentPage = () => {
     const path = location.pathname;
@@ -97,6 +110,14 @@ export default function Navbar() {
             </div>
 
             <div className="flex items-center gap-3">
+              {currentProject && (
+                <div className="hidden md:flex items-center gap-2 px-3 py-1.5 bg-pixel-card border-2 border-pixel-border">
+                  <Folder className="w-4 h-4 text-pixel-neon-cyan" />
+                  <span className="text-vt-sm text-pixel-text-primary max-w-[200px] truncate">
+                    {currentProject.name}
+                  </span>
+                </div>
+              )}
               <div className="hidden md:flex items-center gap-2">
                 <div className="w-8 h-8 bg-pixel-neon-yellow border-2 border-pixel-bg flex items-center justify-center">
                   <span className="text-pixel-xs text-pixel-bg font-bold">DEV</span>

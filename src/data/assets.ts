@@ -225,18 +225,40 @@ export const MOCK_PROJECTS: Project[] = [
     createdAt: Date.now() - 7 * 24 * 60 * 60 * 1000,
     updatedAt: Date.now() - 2 * 60 * 60 * 1000,
     versions: [
+      { id: 'v2', name: '版本 1.1 - 优化了角色配色', snapshot: '', createdAt: Date.now() - 3 * 24 * 60 * 60 * 1000, author: '开发者A' },
       { id: 'v1', name: '版本 1.0', snapshot: '', createdAt: Date.now() - 7 * 24 * 60 * 60 * 1000, author: '开发者A' },
-      { id: 'v2', name: '版本 1.1', snapshot: '', createdAt: Date.now() - 3 * 24 * 60 * 60 * 1000, author: '开发者A' },
     ],
     collaborators: [
-      { id: 'u1', name: '开发者A', avatar: '', role: 'owner' },
       { id: 'u2', name: '美术B', avatar: '', role: 'editor' },
+      { id: 'u1', name: '开发者A', avatar: '', role: 'owner' },
     ],
     comments: [
       { id: 'c1', content: '这里的颜色可以再亮一点', position: { x: 100, y: 100 }, author: '美术B', avatar: '', createdAt: Date.now() - 24 * 60 * 60 * 1000, resolved: false },
     ],
     currentRatio: 'steam-main',
     palette: PRESET_PALETTES[0],
+    brandAssets: {
+      palettes: [PRESET_PALETTES[0], PRESET_PALETTES[5], PRESET_PALETTES[1]],
+      logoVariants: [
+        {
+          id: 'logo-p1-main',
+          name: '主 Logo',
+          slogan: '像素冒险',
+          tagline: 'PIXEL QUEST',
+          description: '游戏官方主标识，适用于商店页面和宣传物料',
+          iconSymbol: '★',
+        },
+        {
+          id: 'logo-p1-alt',
+          name: '复古变体',
+          slogan: '勇者传说',
+          tagline: 'EPIC ADVENTURE',
+          description: '复古绿配色，适用于怀旧向宣传',
+          iconSymbol: '♦',
+        },
+      ],
+      brandPackages: [],
+    },
   },
   {
     id: 'project-2',
@@ -253,6 +275,20 @@ export const MOCK_PROJECTS: Project[] = [
     comments: [],
     currentRatio: '1:1',
     palette: PRESET_PALETTES[1],
+    brandAssets: {
+      palettes: [PRESET_PALETTES[1], PRESET_PALETTES[3]],
+      logoVariants: [
+        {
+          id: 'logo-p2-main',
+          name: '森之守护',
+          slogan: '森林精灵',
+          tagline: 'SPIRIT OF THE WOODS',
+          description: '自然主题 Logo',
+          iconSymbol: '✿',
+        },
+      ],
+      brandPackages: [],
+    },
   },
   {
     id: 'project-3',
@@ -262,12 +298,26 @@ export const MOCK_PROJECTS: Project[] = [
     updatedAt: Date.now() - 30 * 60 * 1000,
     versions: [],
     collaborators: [
-      { id: 'u1', name: '开发者A', avatar: '', role: 'owner' },
       { id: 'u3', name: '策划C', avatar: '', role: 'viewer' },
+      { id: 'u1', name: '开发者A', avatar: '', role: 'owner' },
     ],
     comments: [],
     currentRatio: '16:9',
     palette: PRESET_PALETTES[7],
+    brandAssets: {
+      palettes: [PRESET_PALETTES[7], PRESET_PALETTES[0]],
+      logoVariants: [
+        {
+          id: 'logo-p3-main',
+          name: '霓虹之都',
+          slogan: '赛博都市',
+          tagline: 'NEON CITY 2099',
+          description: '赛博朋克风 Logo',
+          iconSymbol: '⚡',
+        },
+      ],
+      brandPackages: [],
+    },
   },
   {
     id: 'project-4',
@@ -282,6 +332,28 @@ export const MOCK_PROJECTS: Project[] = [
     comments: [],
     currentRatio: 'epic-cover',
     palette: PRESET_PALETTES[2],
+    brandAssets: {
+      palettes: [PRESET_PALETTES[2], PRESET_PALETTES[6], PRESET_PALETTES[4]],
+      logoVariants: [
+        {
+          id: 'logo-p4-main',
+          name: '深渊之眼',
+          slogan: '深海探险',
+          tagline: 'ABYSS EXPLORER',
+          description: '深海主题 Logo',
+          iconSymbol: '◉',
+        },
+        {
+          id: 'logo-p4-alt',
+          name: '船长标识',
+          slogan: '航海日志',
+          tagline: "CAPTAIN'S LOG",
+          description: '航海风变体',
+          iconSymbol: '▲',
+        },
+      ],
+      brandPackages: [],
+    },
   },
 ];
 

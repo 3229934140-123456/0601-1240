@@ -1,3 +1,28 @@
+export interface BrandLogoVariant {
+  id: string;
+  name: string;
+  slogan: string;
+  tagline: string;
+  description: string;
+  iconSymbol: string;
+  dataUrl?: string;
+}
+
+export interface BrandPackage {
+  id: string;
+  name: string;
+  createdAt: number;
+  fileCount: number;
+  sizeKB: number;
+  items: { filename: string; dataUrl: string }[];
+}
+
+export interface BrandAssets {
+  palettes: ColorPalette[];
+  logoVariants: BrandLogoVariant[];
+  brandPackages: BrandPackage[];
+}
+
 export interface Project {
   id: string;
   name: string;
@@ -9,6 +34,7 @@ export interface Project {
   comments: Comment[];
   currentRatio: string;
   palette: ColorPalette;
+  brandAssets: BrandAssets;
 }
 
 export interface Version {

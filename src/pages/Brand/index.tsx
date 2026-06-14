@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Palette,
@@ -16,6 +16,7 @@ import {
   Share2,
   Sparkles,
   Zap,
+  Package,
   Copy,
   Check,
   GripVertical,
@@ -25,8 +26,9 @@ import PixelCard from '@/components/ui/PixelCard';
 import { useProjectStore } from '@/store/projectStore';
 import { useCurrentProject } from '@/hooks/useCurrentProject';
 import { PRESET_PALETTES } from '@/data/palettes';
-import type { ColorPalette } from '@/types';
+import type { ColorPalette, BrandLogoVariant } from '@/types';
 import { cn } from '@/lib/utils';
+import { downloadFile, generateExportImage } from '@/utils/export';
 
 const LOGO_ICONS = [
   { id: 'gamepad', name: '游戏手柄', char: '🎮' },
@@ -49,17 +51,42 @@ const FONT_SIZES = [
 ];
 
 export default function Brand() {
-  const { projects, updatePalette } = useProjectStore();
+  const {
+    projects,
+    updatePalette,
+    addBrandPalette,
+    removeBrandPalette,
+    addLogoVariant,
+    updateLogoVariant,
+    saveBrandPackage,
+  } = useProjectStore();
   const { projectId, currentProject } = useCurrentProject();
 
+  const projectPalettes = currentProject?.brandAssets.palettes || [];
+  const projectLogos = currentProject?.brandAssets.logoVariants || [];
+  const projectPackages = currentProject?.brandAssets.brandPackages || [];
+  const allPalettes = [...projectPalettes, ...PRESET_PALETTES.filter(
+    (p) => !projectPalettes.some((pp) => pp.id === p.id)
+  )];
+
   const [selectedPalette, setSelectedPalette] = useState<ColorPalette>(
-    currentProject?.palette || PRESET_PALETTES[0]
+    currentProject?.palette || allPalettes[0]
   );
   const [customColors, setCustomColors] = useState<string[]>(
-    currentProject?.palette.colors || PRESET_PALETTES[0].colors
+    currentProject?.palette.colors || allPalettes[0].colors
   );
-  const [logoText, setLogoText] = useState('PIXELFORGE');
-  const [selectedIcon, setSelectedIcon] = useState(LOGO_ICONS[0]);
+
+  const initialLogo = projectLogos[0];
+  const [logoText, setLogoText] = useState(initialLogo?.slogan || 'PIXELFORGE');
+  const [logoTagline, setLogoTagline] = useState(initialLogo?.tagline || 'PIXEL ADVENTURE');
+  const [logoDescription, setLogoDescription] = useState(initialLogo?.description || '');
+  const [logoName, setLogoName] = useState(initialLogo?.name || '主 Logo');
+  const [selectedLogoVariant, setSelectedLogoVariant] = useState<BrandLogoVariant | null>(
+    initialLogo || null
+  );
+  const [selectedIcon, setSelectedIcon] = useState(LOGO_ICONS.find(
+    (i) => i.char === initialLogo?.iconSymbol
+  ) || LOGO_ICONS[0]);
   const [effects, setEffects] = useState({
     pixelBorder: true,
     neonGlow: true,
@@ -68,6 +95,31 @@ export default function Brand() {
   const [draggedColorIndex, setDraggedColorIndex] = useState<number | null>(null);
   const [flippedCard, setFlippedCard] = useState<number | null>(null);
   const [copiedColor, setCopiedColor] = useState<string | null>(null);
+  const [packaging, setPackaging] = useState(false);
+
+  useEffect(() => {
+    const palettes = currentProject?.brandAssets.palettes || [];
+    const logos = currentProject?.brandAssets.logoVariants || [];
+    const mergedPalettes = [
+      ...palettes,
+      ...PRESET_PALETTES.filter((p) => !palettes.some((pp) => pp.id === p.id)),
+    ];
+    const defaultPalette = currentProject?.palette || mergedPalettes[0];
+    setSelectedPalette(defaultPalette);
+    setCustomColors([...defaultPalette.colors]);
+    const logo = logos[0];
+    if (logo) {
+      setSelectedLogoVariant(logo);
+      setLogoName(logo.name);
+      setLogoText(logo.slogan);
+      setLogoTagline(logo.tagline);
+      setLogoDescription(logo.description);
+      const foundIcon = LOGO_ICONS.find((i) => i.char === logo.iconSymbol);
+      if (foundIcon) setSelectedIcon(foundIcon);
+    } else {
+      setSelectedLogoVariant(null);
+    }
+  }, [currentProject?.id]);
 
   const handlePresetSelect = (palette: ColorPalette) => {
     setSelectedPalette(palette);
@@ -87,19 +139,103 @@ export default function Brand() {
   };
 
   const handleSavePalette = () => {
-    if (projectId) {
-      const newPalette: ColorPalette = {
-        ...selectedPalette,
-        colors: customColors,
-      };
-      updatePalette(projectId, newPalette);
+    if (!projectId) return;
+    const newPalette: ColorPalette = {
+      ...selectedPalette,
+      id: selectedPalette.id.startsWith('proj-')
+        ? selectedPalette.id
+        : `proj-${projectId}-pal-${Date.now()}`,
+      colors: customColors,
+    };
+    const isProjectPalette = projectPalettes.some((p) => p.id === newPalette.id);
+    if (!isProjectPalette) {
+      addBrandPalette(projectId, newPalette);
+    }
+    updatePalette(projectId, newPalette);
+  };
+
+  const handleDeletePalette = (paletteId: string) => {
+    if (!projectId) return;
+    removeBrandPalette(projectId, paletteId);
+    if (selectedPalette.id === paletteId) {
+      const fallback = allPalettes.find((p) => p.id !== paletteId) || PRESET_PALETTES[0];
+      setSelectedPalette(fallback);
+      setCustomColors([...fallback.colors]);
     }
   };
 
   const handleResetPalette = () => {
-    const original = currentProject?.palette || PRESET_PALETTES[0];
+    const original = currentProject?.palette || allPalettes[0];
     setSelectedPalette(original);
     setCustomColors([...original.colors]);
+  };
+
+  const handleSaveLogo = () => {
+    if (!projectId) return;
+    const variantId = selectedLogoVariant?.id || `logo-${projectId}-${Date.now()}`;
+    const variant: BrandLogoVariant = {
+      id: variantId,
+      name: logoName || '变体',
+      slogan: logoText,
+      tagline: logoTagline,
+      description: logoDescription,
+      iconSymbol: selectedIcon.char,
+    };
+    if (selectedLogoVariant) {
+      updateLogoVariant(projectId, variant.id, variant);
+    } else {
+      addLogoVariant(projectId, variant);
+    }
+    setSelectedLogoVariant(variant);
+  };
+
+  const handleSelectLogoVariant = (variant: BrandLogoVariant) => {
+    setSelectedLogoVariant(variant);
+    setLogoName(variant.name);
+    setLogoText(variant.slogan);
+    setLogoTagline(variant.tagline);
+    setLogoDescription(variant.description);
+    const icon = LOGO_ICONS.find((i) => i.char === variant.iconSymbol);
+    if (icon) setSelectedIcon(icon);
+  };
+
+  const handleNewLogoVariant = () => {
+    setSelectedLogoVariant(null);
+    setLogoName('新变体');
+    setLogoText(logoText);
+    setLogoTagline(logoTagline);
+    setLogoDescription('');
+  };
+
+  const handleExportBrandPackage = async () => {
+    if (!projectId || packaging) return;
+    setPackaging(true);
+    try {
+      const pngRes = await generateExportImage(512, 256, 'png', 'logo');
+      const jpgRes = await generateExportImage(460, 215, 'jpg', 'cover', 92);
+      const paletteText = customColors.map((c, i) => `Color ${i + 1}: ${c}`).join('\n');
+      const paletteBlob = new Blob([paletteText], { type: 'text/plain' });
+      const paletteDataUrl = URL.createObjectURL(paletteBlob);
+      const packageItems: { filename: string; dataUrl: string }[] = [
+        { filename: `${projectId}_logo_512x256.png`, dataUrl: pngRes.dataUrl },
+        { filename: `${projectId}_cover_460x215.jpg`, dataUrl: jpgRes.dataUrl },
+        { filename: `${projectId}_palette.txt`, dataUrl: paletteDataUrl },
+      ];
+      const totalSize = Math.ceil(
+        packageItems.reduce((acc, it) => acc + it.dataUrl.length * 0.75, 0) / 1024
+      );
+      saveBrandPackage(projectId, {
+        name: `${currentProject?.name || '项目'}品牌包`,
+        fileCount: packageItems.length,
+        sizeKB: totalSize,
+        items: packageItems,
+      });
+      if (pngRes.blob) downloadFile(pngRes.blob, packageItems[0].filename);
+      if (jpgRes.blob) downloadFile(jpgRes.blob, packageItems[1].filename);
+      downloadFile(paletteBlob, packageItems[2].filename);
+    } finally {
+      setPackaging(false);
+    }
   };
 
   const handleExportPalette = () => {
@@ -347,15 +483,61 @@ export default function Brand() {
             <PixelCard className="p-4">
               <div className="flex items-center gap-2 mb-4">
                 <Sparkles className="w-4 h-4 text-pixel-neon-cyan" />
-                <h2 className="font-pixel text-pixel-sm text-pixel-text-primary">预设调色板</h2>
+                <h2 className="font-pixel text-pixel-sm text-pixel-text-primary">项目调色板库</h2>
               </div>
-              <div className="space-y-2 max-h-64 overflow-y-auto pr-2">
-                {PRESET_PALETTES.map((palette) => (
+              <div className="space-y-2 max-h-72 overflow-y-auto pr-2">
+                {projectPalettes.length > 0 && (
+                  <div className="mb-3">
+                    <div className="text-pixel-xs font-pixel text-pixel-neon-pink mb-2">★ 本项目专属</div>
+                    {projectPalettes.map((palette) => (
+                      <motion.button
+                        key={palette.id}
+                        onClick={() => handlePresetSelect(palette)}
+                        className={cn(
+                          'w-full p-3 border-4 transition-all text-left mb-2 group',
+                          selectedPalette.id === palette.id
+                            ? 'border-pixel-neon-pink bg-pixel-bg'
+                            : 'border-pixel-border bg-pixel-surface hover:border-pixel-neon-cyan'
+                        )}
+                        whileHover={{ x: selectedPalette.id !== palette.id ? 4 : 0 }}
+                        whileTap={{ scale: 0.98 }}
+                      >
+                        <div className="flex items-center justify-between">
+                          <span className="font-vt text-vt-base text-pixel-text-primary">
+                            {palette.name}
+                          </span>
+                          <div className="flex items-center gap-2">
+                            <div className="flex gap-1">
+                              {palette.colors.slice(0, 4).map((color, i) => (
+                                <div
+                                  key={i}
+                                  className="w-3 h-3 border border-pixel-bg"
+                                  style={{ backgroundColor: color }}
+                                />
+                              ))}
+                            </div>
+                            <XCircle
+                              className="w-4 h-4 text-pixel-text-muted hover:text-pixel-neon-pink opacity-0 group-hover:opacity-100 transition-opacity"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleDeletePalette(palette.id);
+                              }}
+                            />
+                          </div>
+                        </div>
+                      </motion.button>
+                    ))}
+                  </div>
+                )}
+                <div className="text-pixel-xs font-pixel text-pixel-text-muted mb-2">系统预设</div>
+                {PRESET_PALETTES.filter(
+                  (p) => !projectPalettes.some((pp) => pp.id === p.id)
+                ).map((palette) => (
                   <motion.button
                     key={palette.id}
                     onClick={() => handlePresetSelect(palette)}
                     className={cn(
-                      'w-full p-3 border-4 transition-all',
+                      'w-full p-3 border-4 transition-all text-left mb-2',
                       selectedPalette.id === palette.id
                         ? 'border-pixel-neon-pink bg-pixel-bg'
                         : 'border-pixel-border bg-pixel-surface hover:border-pixel-neon-cyan'
@@ -368,10 +550,10 @@ export default function Brand() {
                         {palette.name}
                       </span>
                       <div className="flex gap-1">
-                        {palette.colors.slice(0, 5).map((color, i) => (
+                        {palette.colors.slice(0, 4).map((color, i) => (
                           <motion.div
                             key={i}
-                            className="w-4 h-4 border border-pixel-bg"
+                            className="w-3 h-3 border border-pixel-bg"
                             style={{ backgroundColor: color }}
                             initial={{ scale: 0 }}
                             animate={{ scale: 1 }}
@@ -820,9 +1002,54 @@ export default function Brand() {
               </div>
 
               <div className="space-y-4">
+                {projectLogos.length > 0 && (
+                  <div>
+                    <label className="font-pixel text-pixel-xs text-pixel-text-secondary block mb-2">
+                      项目 Logo 变体
+                    </label>
+                    <div className="space-y-1 max-h-28 overflow-y-auto mb-2">
+                      {projectLogos.map((v) => (
+                        <button
+                          key={v.id}
+                          onClick={() => handleSelectLogoVariant(v)}
+                          className={cn(
+                            'w-full text-left px-2 py-1 border-2 text-vt-sm transition-colors',
+                            selectedLogoVariant?.id === v.id
+                              ? 'border-pixel-neon-cyan bg-pixel-neon-cyan/10 text-pixel-neon-cyan'
+                              : 'border-pixel-border bg-pixel-surface text-pixel-text-primary hover:border-pixel-neon-pink'
+                          )}
+                        >
+                          <span className="font-pixel text-pixel-xs">{v.name}</span>
+                          <span className="text-pixel-text-muted ml-2">{v.slogan}</span>
+                        </button>
+                      ))}
+                    </div>
+                    <PixelButton
+                      variant="ghost"
+                      size="sm"
+                      className="w-full"
+                      onClick={handleNewLogoVariant}
+                    >
+                      + 新建变体
+                    </PixelButton>
+                  </div>
+                )}
+
                 <div>
                   <label className="font-pixel text-pixel-xs text-pixel-text-secondary block mb-2">
-                    Logo 文字
+                    变体名称
+                  </label>
+                  <input
+                    type="text"
+                    value={logoName}
+                    onChange={(e) => setLogoName(e.target.value)}
+                    maxLength={16}
+                    className="input-pixel text-vt-sm"
+                  />
+                </div>
+                <div>
+                  <label className="font-pixel text-pixel-xs text-pixel-text-secondary block mb-2">
+                    Logo 主文案
                   </label>
                   <input
                     type="text"
@@ -834,6 +1061,30 @@ export default function Brand() {
                   <p className="font-vt text-vt-sm text-pixel-text-muted mt-1">
                     {logoText.length}/12 字符
                   </p>
+                </div>
+                <div>
+                  <label className="font-pixel text-pixel-xs text-pixel-text-secondary block mb-2">
+                    副标题 / Tagline
+                  </label>
+                  <input
+                    type="text"
+                    value={logoTagline}
+                    onChange={(e) => setLogoTagline(e.target.value)}
+                    maxLength={24}
+                    className="input-pixel font-pixel text-pixel-xs"
+                  />
+                </div>
+                <div>
+                  <label className="font-pixel text-pixel-xs text-pixel-text-secondary block mb-2">
+                    变体描述
+                  </label>
+                  <textarea
+                    value={logoDescription}
+                    onChange={(e) => setLogoDescription(e.target.value)}
+                    rows={2}
+                    maxLength={80}
+                    className="input-pixel text-vt-sm resize-none"
+                  />
                 </div>
 
                 <div>
@@ -948,22 +1199,83 @@ export default function Brand() {
                   </div>
                 </div>
 
-                <div className="pt-2">
-                  <PixelButton variant="primary" size="lg" className="w-full">
-                    <Download className="w-4 h-4 inline mr-2" />
-                    导出 Logo
+                <div className="pt-2 space-y-2">
+                  <PixelButton
+                    variant="secondary"
+                    size="md"
+                    className="w-full"
+                    onClick={handleSaveLogo}
+                  >
+                    <Save className="w-4 h-4 inline mr-2" />
+                    {selectedLogoVariant ? '更新 Logo 变体' : '保存为新变体'}
                   </PixelButton>
-                  <div className="grid grid-cols-2 gap-2 mt-2">
-                    <PixelButton variant="secondary" size="sm" className="w-full">
-                      PNG
-                    </PixelButton>
-                    <PixelButton variant="secondary" size="sm" className="w-full">
-                      SVG
-                    </PixelButton>
-                  </div>
+                  <PixelButton
+                    variant="primary"
+                    size="lg"
+                    className="w-full"
+                    onClick={handleExportBrandPackage}
+                    disabled={packaging}
+                  >
+                    <Package className="w-4 h-4 inline mr-2" />
+                    {packaging ? '正在打包...' : '导出品牌包 (ZIP)'}
+                  </PixelButton>
                 </div>
               </div>
             </PixelCard>
+
+            {projectPackages.length > 0 && (
+              <PixelCard className="p-4">
+                <div className="flex items-center gap-2 mb-3">
+                  <Share2 className="w-4 h-4 text-pixel-neon-yellow" />
+                  <h2 className="font-pixel text-pixel-sm text-pixel-text-primary">品牌包历史</h2>
+                </div>
+                <div className="space-y-2 max-h-40 overflow-y-auto">
+                  {projectPackages.map((pkg) => (
+                    <div
+                      key={pkg.id}
+                      className="p-2 border-2 border-pixel-border bg-pixel-surface hover:border-pixel-neon-cyan transition-colors"
+                    >
+                      <div className="flex justify-between items-center">
+                        <span className="text-vt-sm text-pixel-text-primary">{pkg.name}</span>
+                        <span className="text-pixel-xs text-pixel-text-muted">
+                          {pkg.fileCount} 个文件 · {pkg.sizeKB}KB
+                        </span>
+                      </div>
+                      <div className="text-pixel-xs text-pixel-text-muted mt-1">
+                        {new Date(pkg.createdAt).toLocaleString('zh-CN')}
+                      </div>
+                      <div className="flex gap-1 mt-2">
+                        {pkg.items.slice(0, 3).map((it) => (
+                          <PixelButton
+                            key={it.filename}
+                            size="sm"
+                            variant="ghost"
+                            className="flex-1"
+                            onClick={() => {
+                              if (it.dataUrl.startsWith('data:')) {
+                                const parts = it.dataUrl.split(',');
+                                const mime = parts[0].match(/:(.*?);/)?.[1] || '';
+                                const binary = atob(parts[1] || '');
+                                const arr = new Uint8Array(binary.length);
+                                for (let i = 0; i < binary.length; i++) arr[i] = binary.charCodeAt(i);
+                                downloadFile(new Blob([arr], { type: mime }), it.filename);
+                              } else {
+                                const a = document.createElement('a');
+                                a.href = it.dataUrl;
+                                a.download = it.filename;
+                                a.click();
+                              }
+                            }}
+                          >
+                            {it.filename.split('.').pop()}
+                          </PixelButton>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </PixelCard>
+            )}
           </div>
         </div>
       </main>

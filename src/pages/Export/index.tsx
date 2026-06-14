@@ -45,6 +45,8 @@ import {
   generateFilename,
   generateReleaseChecklistContent,
   copyToClipboard,
+  syncChecklistFromExports,
+  buildExportZip,
 } from '@/utils/export';
 
 const mockExportItems: ExportItem[] = [
@@ -170,7 +172,9 @@ export default function ExportPage() {
   const [exportedBlobs, setExportedBlobs] = useState<Record<string, { blob: Blob; dataUrl: string }>>({});
   const [checklistContent, setChecklistContent] = useState<string>('');
   const [showChecklistModal, setShowChecklistModal] = useState(false);
-  const [copySuccess, setCopySuccess] = useState<'checklist' | null>(null);
+  const [copySuccess, setCopySuccess] = useState<'checklist' | 'zip' | null>(null);
+  const [zipBusy, setZipBusy] = useState(false);
+  const [zipProgress, setZipProgress] = useState(0);
   
   const processingRef = useRef<Set<string>>(new Set());
 
@@ -400,10 +404,46 @@ export default function ExportPage() {
 
   const handleGenerateChecklist = useCallback(() => {
     const projectName = currentProject?.name || 'PixelForge Project';
-    const content = generateReleaseChecklistContent(projectName, checklist, exportItems);
+    const synced = syncChecklistFromExports(checklist, exportItems);
+    setChecklist(synced);
+    const content = generateReleaseChecklistContent(projectName, synced, exportItems);
     setChecklistContent(content);
     setShowChecklistModal(true);
   }, [currentProject, checklist, exportItems]);
+
+  const handleDownloadZip = useCallback(async () => {
+    const doneItems = selectedItems.length > 0
+      ? exportItems.filter((i) => selectedItems.includes(i.id) && i.status === 'done')
+      : exportItems.filter((i) => i.status === 'done');
+    if (doneItems.length === 0) return;
+    setZipBusy(true);
+    setZipProgress(10);
+    try {
+      await new Promise((r) => setTimeout(r, 150));
+      setZipProgress(30);
+      const projectName = currentProject?.name || 'PixelForge Project';
+      const synced = syncChecklistFromExports(checklist, exportItems);
+      const content = generateReleaseChecklistContent(projectName, synced, exportItems);
+      setZipProgress(60);
+      const zipBlob = await buildExportZip(doneItems, exportedBlobs, {
+        prefix: namingPrefix || projectName.replace(/\s+/g, '_'),
+        projectName,
+        checklistContent: content,
+        checklist: synced,
+      });
+      setZipProgress(95);
+      const filename = `${projectName.replace(/\s+/g, '_')}_export_pack.zip`;
+      downloadFile(zipBlob, filename);
+      setCopySuccess('zip');
+      setTimeout(() => setCopySuccess(null), 2500);
+    } catch (e) {
+      console.error('ZIP打包失败', e);
+      alert('ZIP打包失败，请重试');
+    } finally {
+      setZipBusy(false);
+      setZipProgress(0);
+    }
+  }, [selectedItems, exportItems, currentProject, checklist, exportedBlobs, namingPrefix]);
 
   const handleCopyChecklist = useCallback(async () => {
     if (!checklistContent) return;
@@ -564,12 +604,23 @@ export default function ExportPage() {
               批量导出您的像素艺术作品，适配各大游戏平台
             </p>
           </div>
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-3 flex-wrap">
             {doneCountFromExport > 0 && (
-              <PixelButton variant="ghost" size="md" onClick={handleDownloadSelected}>
-                <Download className="w-4 h-4 mr-2" />
-                {selectedItems.length > 0 ? `下载选中(${selectedItems.filter((id) => exportItems.find((i) => i.id === id)?.status === 'done').length})` : `下载全部完成(${doneCountFromExport})`}
-              </PixelButton>
+              <>
+                <PixelButton variant="ghost" size="md" onClick={handleDownloadSelected}>
+                  <Download className="w-4 h-4 mr-2" />
+                  {selectedItems.length > 0 ? `下载选中(${selectedItems.filter((id) => exportItems.find((i) => i.id === id)?.status === 'done').length})` : `下载单图(${doneCountFromExport})`}
+                </PixelButton>
+                <PixelButton
+                  variant={copySuccess === 'zip' ? 'primary' : 'warning'}
+                  size="md"
+                  onClick={handleDownloadZip}
+                  disabled={zipBusy}
+                >
+                  <Package className="w-4 h-4 mr-2" />
+                  {zipBusy ? `打包中 ${zipProgress}%` : copySuccess === 'zip' ? 'ZIP已下载!' : (selectedItems.length > 0 ? '打包选中(ZIP)' : `打包全部(${doneCountFromExport})`)}
+                </PixelButton>
+              </>
             )}
             <PixelButton variant="secondary" size="md" onClick={exportAll}>
               <Play className="w-4 h-4 mr-2" />
